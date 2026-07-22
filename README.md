@@ -1,10 +1,10 @@
 # hypeagent
 
-Standalone CLI for running LLM-powered persona agents against social platforms.
+CLI based tool for running LLM-powered persona agents on social platforms.
 
 > **Alpha (v0.1):** Early release — expect breaking changes before v1.0.
 
-Seed discussion on Reddit (and other platforms) with configurable personas, budgets, and approval workflows.
+Seed discussion on platforms like Reddit with configurable personas, budgets, and approval workflows.
 
 ## Install
 
