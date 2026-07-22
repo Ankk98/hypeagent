@@ -256,6 +256,18 @@ class ToolExecutor:
         total_cost += response.cost_usd
         resolved_model = response.model
         content = response.content
+        ctx.logger.debug(
+            (
+                "run_id=%s agent=%s event=llm_call model=%s "
+                "tokens_in=%d tokens_out=%d cost_usd=%.4f"
+            ),
+            ctx.run_id,
+            ctx.agent_id,
+            response.model,
+            response.tokens_in,
+            response.tokens_out,
+            response.cost_usd,
+        )
 
         for _round in range(MAX_TOOL_ROUNDS):
             request = parse_tool_request(content)
@@ -301,6 +313,18 @@ class ToolExecutor:
             total_cost += response.cost_usd
             resolved_model = response.model
             content = response.content
+            ctx.logger.debug(
+                (
+                    "run_id=%s agent=%s event=llm_call model=%s "
+                    "tokens_in=%d tokens_out=%d cost_usd=%.4f"
+                ),
+                ctx.run_id,
+                ctx.agent_id,
+                response.model,
+                response.tokens_in,
+                response.tokens_out,
+                response.cost_usd,
+            )
 
         return ToolRoundResult(
             final_text=content.strip(),

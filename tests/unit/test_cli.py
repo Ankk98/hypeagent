@@ -187,3 +187,48 @@ def test_run_command_rejects_dry_run_mode() -> None:
     assert result.exit_code == 1
     assert "dry-run" in result.stderr.lower()
 
+
+def test_cron_print_outputs_crontab_lines() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(EXAMPLE_CONFIG),
+            "--secrets",
+            str(EXAMPLE_SECRETS),
+            "cron-print",
+            "--times",
+            "09:00,13:00,18:00,22:00",
+            "--timezone",
+            "Asia/Kolkata",
+            "--project-dir",
+            str(Path("examples/reddit").resolve()),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "# Paste into crontab -e" in result.stdout
+    assert "CRON_TZ=Asia/Kolkata" in result.stdout
+    assert "0 9 * * *" in result.stdout
+    assert "0 13 * * *" in result.stdout
+    assert "0 18 * * *" in result.stdout
+    assert "0 22 * * *" in result.stdout
+    assert "hypeagent run --mode auto" in result.stdout
+    assert ">> logs/cron.log 2>&1" in result.stdout
+
+
+def test_validate_example_from_reddit_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    reddit_dir = Path("examples/reddit").resolve()
+    monkeypatch.chdir(reddit_dir)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            "hypeagent.yaml",
+            "--secrets",
+            "secrets.example.yaml",
+            "validate",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "✓ tools: show_context, recent_episode importable" in result.stdout
+

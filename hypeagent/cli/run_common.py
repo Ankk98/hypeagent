@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import sys
 from pathlib import Path
 
 import typer
@@ -16,19 +14,9 @@ from hypeagent.config.secrets import SecretsError, load_secrets, validate_accoun
 from hypeagent.config.secrets_schema import Secrets
 from hypeagent.db.connection import Database, resolve_db_path
 from hypeagent.llm.budget import BudgetExceededError
+from hypeagent.logging.setup import configure_logging
 from hypeagent.models.run import RunMode, RunResult
 from hypeagent.platforms.base import PlatformError
-
-
-def _setup_logging(verbose: bool) -> logging.Logger:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(message)s",
-        stream=sys.stderr,
-        force=True,
-    )
-    return logging.getLogger("hypeagent")
 
 
 def _load_run_inputs(
@@ -76,9 +64,13 @@ def execute_run(
 ) -> None:
     """Load config, run agents, and exit with the appropriate status code."""
     config, secrets = _load_run_inputs(config_path, secrets_path)
-    logger = _setup_logging(verbose)
-    resolved_db = resolve_db_path(db_path)
     base_dir = config_path.resolve().parent
+    logger = configure_logging(
+        config.logging,
+        config_dir=base_dir,
+        verbose=verbose,
+    )
+    resolved_db = resolve_db_path(db_path)
 
     try:
         with Database(resolved_db) as db:

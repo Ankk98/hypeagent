@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from hypeagent import __version__
+from hypeagent.cli.cron_print import run_cron_print
 from hypeagent.cli.dry_run import run_dry_run
 from hypeagent.cli.run import register_run_command
 from hypeagent.cli.usage import usage_app
@@ -70,6 +71,46 @@ def validate_cmd(ctx: typer.Context) -> None:
 def dry_run_cmd(ctx: typer.Context) -> None:
     """Propose actions without publishing (default mode)."""
     run_dry_run(ctx)
+
+
+@app.command("cron-print")
+def cron_print_cmd(
+    ctx: typer.Context,
+    times: Annotated[
+        str,
+        typer.Option("--times", help="Comma-separated run times (HH:MM)"),
+    ] = "09:00",
+    timezone: Annotated[
+        str,
+        typer.Option("--timezone", help="IANA timezone for CRON_TZ"),
+    ] = "UTC",
+    project_dir: Annotated[
+        Path | None,
+        typer.Option("--project-dir", help="Project directory for cd in crontab"),
+    ] = None,
+    log_file: Annotated[
+        Path,
+        typer.Option("--log-file", help="Cron log file path (relative to project-dir)"),
+    ] = Path("logs/cron.log"),
+    mode: Annotated[
+        str,
+        typer.Option("--mode", help="Run mode passed to hypeagent run"),
+    ] = "auto",
+) -> None:
+    """Print suggested crontab lines for scheduled runs."""
+    ctx_obj = ctx.obj or {}
+    config_path = ctx_obj.get("config", Path("hypeagent.yaml"))
+    secrets_path = ctx_obj.get("secrets", Path("secrets.local.yaml"))
+    resolved_project = project_dir or Path.cwd()
+    run_cron_print(
+        times=times,
+        timezone=timezone,
+        project_dir=resolved_project.resolve(),
+        config_path=config_path,
+        secrets_path=secrets_path,
+        log_file=log_file,
+        mode=mode,
+    )
 
 
 register_run_command(app)
