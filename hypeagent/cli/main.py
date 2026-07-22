@@ -8,6 +8,8 @@ from typing import Annotated
 import typer
 
 from hypeagent import __version__
+from hypeagent.cli.dry_run import run_dry_run
+from hypeagent.cli.run import register_run_command
 from hypeagent.cli.usage import usage_app
 from hypeagent.cli.validate import run_validate
 
@@ -62,3 +64,12 @@ def validate_cmd(ctx: typer.Context) -> None:
     config_path = ctx_obj.get("config", Path("hypeagent.yaml"))
     secrets_path = ctx_obj.get("secrets", Path("secrets.local.yaml"))
     run_validate(config_path, secrets_path)
+
+
+@app.command("dry-run")
+def dry_run_cmd(ctx: typer.Context) -> None:
+    """Propose actions without publishing (default mode)."""
+    run_dry_run(ctx)
+
+
+register_run_command(app)

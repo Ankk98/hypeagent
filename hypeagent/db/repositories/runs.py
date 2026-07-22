@@ -127,6 +127,14 @@ class RunsRepository:
         assert row_id is not None
         return int(row_id)
 
+    def update_draft_text(self, action_id: int, draft_text: str) -> None:
+        """Update draft text after inline approval edit."""
+        self._db.conn.execute(
+            "UPDATE proposed_actions SET draft_text = ? WHERE id = ?",
+            (draft_text, action_id),
+        )
+        self._db.conn.commit()
+
     def mark_published(self, action_id: int, platform_comment_id: str) -> None:
         """Mark a proposed action as published."""
         self._db.conn.execute(

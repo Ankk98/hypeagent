@@ -9,6 +9,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from hypeagent.agent.approval import (
+    ApprovalDecision,
+    ApprovalPrompt,
+    ApprovalQuitError,
+    ApprovalResponse,
+)
 from hypeagent.agent.loop import AgentRunner
 from hypeagent.config.schema import HypeagentConfig
 from hypeagent.config.secrets_schema import AccountSecret, Secrets
@@ -299,3 +305,162 @@ class TestAgentLoopDryRun:
             result = AgentRunner(config, secrets, db).run_all(RunMode.DRY_RUN)
 
         assert len(result.proposed_actions) == 1
+
+
+class TestAgentLoopPublishModes:
+    def _run_with_connector(
+        self,
+        tmp_path,
+        mock_llm: MagicMock,
+        *,
+        mode: RunMode,
+        approval: ApprovalPrompt | None = None,
+        agents: list[str] | None = None,
+    ):
+        config = _minimal_config(agents=agents or ["alice"])
+        secrets = _secrets()
+        db_path = tmp_path / f"{mode.value}.db"
+
+        connector_instance: MockConnector | None = None
+
+        def connector_loader(name: str) -> type[PlatformConnector]:
+            assert name == "reddit"
+
+            class _Loader(MockConnector):
+                def __init__(
+                    self,
+                    platform_config: Any,
+                    account: AccountSecret,
+                    http: Any,
+                ) -> None:
+                    nonlocal connector_instance
+                    super().__init__(
+                        [_content("post-a")],
+                        {
+                            "post-a": Thread(
+                                content=_content("post-a"),
+                                comments=[_comment("c1", "post-a")],
+                            ),
+                        },
+                        platform_config=platform_config,
+                        account=account,
+                        http=http,
+                    )
+                    connector_instance = self
+
+            return _Loader
+
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch("hypeagent.agent.loop.load_connector", side_effect=connector_loader)
+            )
+            stack.enter_context(
+                patch("hypeagent.agent.loop.LLMClient", return_value=mock_llm)
+            )
+            if approval is not None:
+                stack.enter_context(
+                    patch("hypeagent.agent.loop.ApprovalPrompt", return_value=approval)
+                )
+            db = stack.enter_context(Database(db_path))
+            runner = AgentRunner(config, secrets, db)
+            result = runner.run_all(mode)
+
+        assert connector_instance is not None
+        return result, connector_instance, db_path
+
+    def test_auto_mode_publishes(self, tmp_path, mock_llm: MagicMock) -> None:
+        result, connector, db_path = self._run_with_connector(
+            tmp_path,
+            mock_llm,
+            mode=RunMode.AUTO,
+        )
+
+        assert result.status == "completed"
+        assert len(result.proposed_actions) == 1
+        assert len(result.published_actions) == 1
+        assert result.published_actions[0].approved_by == "auto"
+        assert len(connector.publish_calls) == 1
+
+        with Database(db_path) as db:
+            stored = RunsRepository(db).get_proposed_for_run(result.run_id)
+            assert stored[0].published is True
+            assert stored[0].platform_comment_id == "published-1"
+
+    def test_approve_mode_publishes_on_yes(self, tmp_path, mock_llm: MagicMock) -> None:
+        approval = MagicMock(spec=ApprovalPrompt)
+        approval.prompt.return_value = ApprovalResponse(
+            ApprovalDecision.PUBLISH,
+            "Haan yaar same feeling",
+        )
+
+        result, connector, _ = self._run_with_connector(
+            tmp_path,
+            mock_llm,
+            mode=RunMode.APPROVE,
+            approval=approval,
+        )
+
+        assert len(result.published_actions) == 1
+        assert result.published_actions[0].approved_by == "human"
+        assert len(connector.publish_calls) == 1
+        approval.prompt.assert_called_once()
+
+    def test_approve_mode_skips_on_no(self, tmp_path, mock_llm: MagicMock) -> None:
+        approval = MagicMock(spec=ApprovalPrompt)
+        approval.prompt.return_value = ApprovalResponse(
+            ApprovalDecision.SKIP,
+            "Haan yaar same feeling",
+        )
+
+        result, connector, db_path = self._run_with_connector(
+            tmp_path,
+            mock_llm,
+            mode=RunMode.APPROVE,
+            approval=approval,
+        )
+
+        assert result.published_actions == []
+        assert connector.publish_calls == []
+
+        with Database(db_path) as db:
+            stored = RunsRepository(db).get_proposed_for_run(result.run_id)
+            assert stored[0].published is False
+
+    def test_approve_mode_quit_raises(self, tmp_path, mock_llm: MagicMock) -> None:
+        approval = MagicMock(spec=ApprovalPrompt)
+        approval.prompt.return_value = ApprovalResponse(
+            ApprovalDecision.QUIT,
+            "Haan yaar same feeling",
+        )
+
+        with pytest.raises(ApprovalQuitError):
+            self._run_with_connector(
+                tmp_path,
+                mock_llm,
+                mode=RunMode.APPROVE,
+                approval=approval,
+            )
+
+    def test_approve_mode_updates_edited_draft(self, tmp_path, mock_llm: MagicMock) -> None:
+        approval = MagicMock(spec=ApprovalPrompt)
+        approval.prompt.return_value = ApprovalResponse(
+            ApprovalDecision.PUBLISH,
+            "Edited by human",
+        )
+
+        result, connector, db_path = self._run_with_connector(
+            tmp_path,
+            mock_llm,
+            mode=RunMode.APPROVE,
+            approval=approval,
+        )
+
+        assert connector.publish_calls[0][1] == "Edited by human"
+
+        with Database(db_path) as db:
+            stored = RunsRepository(db).get_proposed_for_run(result.run_id)
+            assert stored[0].draft_text == "Edited by human"
+            assert result.proposed_actions[0].draft_text == "Edited by human"
+

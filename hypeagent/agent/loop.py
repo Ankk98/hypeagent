@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from hypeagent.agent.approval import ApprovalDecision, ApprovalPrompt, ApprovalQuitError
 from hypeagent.agent.drafter import Drafter
 from hypeagent.agent.planner import Planner
 from hypeagent.config.schema import HypeagentConfig
@@ -61,6 +62,7 @@ class AgentRunner:
         static_loader = StaticKnowledgeLoader(self._base_dir)
         drafter = Drafter(static_loader, tool_executor)
         planner = Planner()
+        approval = ApprovalPrompt()
         memory_repo = AgentMemoryRepository(self._db)
 
         agent_ids = list(self._config.run.agents)
@@ -97,7 +99,11 @@ class AgentRunner:
                         memory_repo=memory_repo,
                         planner=planner,
                         drafter=drafter,
+                        approval=approval,
                     )
+                except ApprovalQuitError:
+                    status = "failed"
+                    raise
                 except BudgetExceededError as exc:
                     status = "budget_exceeded"
                     errors.append(str(exc))
@@ -155,6 +161,7 @@ class AgentRunner:
         memory_repo: AgentMemoryRepository,
         planner: Planner,
         drafter: Drafter,
+        approval: ApprovalPrompt,
     ) -> tuple[ProposedAction | None, PublishedAction | None]:
         persona = self._config.personas[agent_id]
         account = self._secrets.accounts[persona.account]
@@ -254,6 +261,7 @@ class AgentRunner:
             proposed=proposed,
             action_id=action_id,
             mode=mode,
+            approval=approval,
             memory_repo=memory_repo,
             runs_repo=runs_repo,
         )
@@ -268,6 +276,7 @@ class AgentRunner:
         proposed: ProposedAction,
         action_id: int,
         mode: RunMode,
+        approval: ApprovalPrompt,
         memory_repo: AgentMemoryRepository,
         runs_repo: RunsRepository,
     ) -> PublishedAction | None:
@@ -283,14 +292,29 @@ class AgentRunner:
             return None
 
         if mode == RunMode.APPROVE:
-            # ApprovalPrompt wired in Phase 8.
-            self._logger.info(
-                "run_id=%s agent=%s event=approve_skipped content_id=%s",
-                proposed.run_id,
-                proposed.agent_id,
-                proposed.content_id,
+            response = approval.prompt(ctx, proposed)
+            if response.decision == ApprovalDecision.QUIT:
+                raise ApprovalQuitError("User quit during approval")
+            if response.decision == ApprovalDecision.SKIP:
+                self._logger.info(
+                    "run_id=%s agent=%s event=approval_skipped content_id=%s",
+                    proposed.run_id,
+                    proposed.agent_id,
+                    proposed.content_id,
+                )
+                return None
+            if response.draft_text != proposed.draft_text:
+                proposed.draft_text = response.draft_text
+                runs_repo.update_draft_text(action_id, response.draft_text)
+            return self._publish(
+                ctx=ctx,
+                connector=connector,
+                proposed=proposed,
+                action_id=action_id,
+                approved_by="human",
+                memory_repo=memory_repo,
+                runs_repo=runs_repo,
             )
-            return None
 
         return self._publish(
             ctx=ctx,

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
 from hypeagent.cli.main import app
@@ -107,3 +109,81 @@ def test_usage_reset_clears_totals(tmp_path: Path) -> None:
     with Database(db_path) as db:
         repo = UsageRepository(db)
         assert repo.get_total_cost() == 0.0
+
+
+def test_dry_run_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hypeagent.models.run import RunMode
+
+    captured: dict[str, RunMode] = {}
+
+    def fake_execute_run(**kwargs: object) -> None:
+        captured["mode"] = kwargs["mode"]  # type: ignore[index]
+        raise typer.Exit(code=0)
+
+    from hypeagent.cli import dry_run as dry_run_module
+
+    monkeypatch.setattr(dry_run_module, "execute_run", fake_execute_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(EXAMPLE_CONFIG),
+            "--secrets",
+            str(EXAMPLE_SECRETS),
+            "--db",
+            str(tmp_path / "dry.db"),
+            "dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert captured["mode"] == RunMode.DRY_RUN
+
+
+def test_run_command_auto_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hypeagent.models.run import RunMode
+
+    captured: dict[str, RunMode] = {}
+
+    def fake_execute_run(**kwargs: object) -> None:
+        captured["mode"] = kwargs["mode"]  # type: ignore[index]
+        raise typer.Exit(code=0)
+
+    from hypeagent.cli import run as run_module
+
+    monkeypatch.setattr(run_module, "execute_run", fake_execute_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(EXAMPLE_CONFIG),
+            "--secrets",
+            str(EXAMPLE_SECRETS),
+            "--db",
+            str(tmp_path / "run.db"),
+            "run",
+            "--mode",
+            "auto",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert captured["mode"] == RunMode.AUTO
+
+
+def test_run_command_rejects_dry_run_mode() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(EXAMPLE_CONFIG),
+            "--secrets",
+            str(EXAMPLE_SECRETS),
+            "run",
+            "--mode",
+            "dry_run",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "dry-run" in result.stderr.lower()
+
