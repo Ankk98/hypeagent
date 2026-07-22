@@ -32,3 +32,10 @@ jobs:
 
       - name: Pytest
         run: pytest -v
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+          test -f dist/hypeagent-*.tar.gz
+          test -f dist/hypeagent-*.whl

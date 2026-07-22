@@ -1052,12 +1052,14 @@ Last run: 2026-07-22T18:02:11Z mode=approve status=completed
 ## 17. Sample end-to-end flow (Reddit, 5 agents)
 
 ```bash
-# 1. Install
+# 1. Install (use a venv per project)
+mkdir -p my-reddit-seed && cd my-reddit-seed
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install hypeagent
 
 # 2. Init from example
-cp -r $(python -c "import hypeagent; import os; print(os.path.dirname(hypeagent.__file__))")/../examples/reddit ./my-reddit-seed
-cd my-reddit-seed
+cp -r $(python -c "import hypeagent; import os; print(os.path.dirname(hypeagent.__file__))")/../examples/reddit/* .
 cp secrets.example.yaml secrets.local.yaml
 # Edit secrets.local.yaml with Reddit OAuth tokens
 

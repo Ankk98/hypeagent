@@ -5,20 +5,29 @@ Two persona agents reply to posts in a subreddit using OpenRouter and Reddit OAu
 ## Prerequisites
 
 - Python 3.11+
+- A virtual environment (venv) for the project — see setup below
 - [OpenRouter](https://openrouter.ai/) API key
 - Reddit app credentials (script or web app) with OAuth tokens per account
 
 ## Setup (~15 minutes)
 
 ```bash
-# From the repo root (development install)
-pip install -e ".[dev]"
+# Create project directory and venv
+mkdir -p my-reddit-seed && cd my-reddit-seed
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# Or copy this folder to your project
-cp -r examples/reddit ./my-reddit-seed
-cd my-reddit-seed
+# From PyPI
 pip install hypeagent
+cp -r "$(python -c "import hypeagent, os; print(os.path.dirname(hypeagent.__file__))")/../examples/reddit"/* .
+
+# Or clone the repo for development
+# git clone https://github.com/Ankk98/hypeagent.git && cd hypeagent
+# python3 -m venv .venv && source .venv/bin/activate
+# pip install -e ".[dev]" && cd examples/reddit
 ```
+
+Keep the venv activated whenever you run `hypeagent` commands in this directory.
 
 Copy and edit secrets:
 
@@ -60,10 +69,11 @@ Preview each draft and press `Y` to publish, `n` to skip, `q` to quit.
 ## Auto run via cron
 
 ```bash
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 hypeagent cron-print --times "09:00,13:00,18:00,22:00" --timezone Asia/Kolkata
 ```
 
-Paste the output into `crontab -e`.
+Paste the output into `crontab -e`. Use the full path to `.venv/bin/hypeagent` in crontab lines so scheduled jobs do not require shell activation.
 
 ## Usage and budgets
 
