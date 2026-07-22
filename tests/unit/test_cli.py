@@ -34,6 +34,7 @@ def test_validate_example_passes() -> None:
     assert result.exit_code == 0, result.stdout + result.stderr
     assert "✓ hypeagent.yaml schema valid" in result.stdout
     assert "✓ connector 'reddit' importable" in result.stdout
+    assert "✓ tools: show_context, recent_episode importable" in result.stdout
     assert "✓ personas reference valid accounts" in result.stdout
     assert "Ready." in result.stdout
 

@@ -8,6 +8,7 @@ import typer
 
 from hypeagent.config.loader import ConfigError, load_config
 from hypeagent.config.secrets import SecretsError, load_secrets, validate_account_refs
+from hypeagent.knowledge.tools import validate_tools
 from hypeagent.platforms.registry import ConnectorLoadError, load_connector
 
 
@@ -38,6 +39,15 @@ def run_validate(config_path: Path, secrets_path: Path) -> None:
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"✓ connector {connector_cls.name!r} importable")
+
+    if config.knowledge.tools:
+        tool_errors = validate_tools(config.knowledge.tools)
+        if tool_errors:
+            for message in tool_errors:
+                typer.secho(f"✗ {message}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        tool_names = ", ".join(tool.name for tool in config.knowledge.tools)
+        typer.echo(f"✓ tools: {tool_names} importable")
 
     account_errors = validate_account_refs(config.personas, secrets)
     if account_errors:
