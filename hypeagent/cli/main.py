@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from hypeagent import __version__
+from hypeagent.cli.usage import usage_app
 from hypeagent.cli.validate import run_validate
 
 app = typer.Typer(
@@ -43,6 +44,9 @@ def main(
     ctx.obj["secrets"] = secrets
     ctx.obj["db"] = db
     ctx.obj["verbose"] = verbose
+
+
+app.add_typer(usage_app, name="usage")
 
 
 @app.command("version")
