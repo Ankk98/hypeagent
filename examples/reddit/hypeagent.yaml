@@ -1,0 +1,91 @@
+version: 1
+
+name: reddit-seed-example
+extra_info: >
+  Optional global hints for all agents.
+
+platform:
+  connector: reddit
+  base_url: https://oauth.reddit.com
+  user_agent: hypeagent/1.0 (by u/yourname)
+  subreddit: test
+  extra_info: >
+    Subreddit-focused. Respect rate limits.
+
+http:
+  timeout_seconds: 30
+  retry_count: 2
+
+llm:
+  provider: openrouter
+  base_url: https://openrouter.ai/api/v1
+  model: openai/gpt-4o-mini
+  temperature: 0.9
+  max_tokens: 256
+  extra_info: >
+    Prefer short casual replies.
+
+budgets:
+  llm_daily_usd: 2.00
+  llm_total_usd: 50.00
+  max_actions_per_run: 50
+
+run:
+  agents:
+    - priya_blr
+    - rohan_del
+  per_agent:
+    comments: 0
+    replies: 1
+  reply_depth_max: 2
+  extra_info: >
+    One reply per agent per run.
+
+targeting:
+  strategy: random_with_comments_last_24h
+  params:
+    since_hours: 24
+    min_comment_count: 1
+  extra_info: >
+    Pick posts that already have discussion.
+
+personas:
+  priya_blr:
+    account: priya_blr
+    city: Bangalore
+    languages: [hinglish, en]
+    brief: >
+      26F software engineer in Bangalore. Casual Hinglish, yaar/na sometimes.
+      Short replies, sometimes slangy. Never sound like a bot.
+    extra_info: >
+      Reality TV fan.
+
+  rohan_del:
+    account: rohan_del
+    city: Delhi
+    languages: [en, hindi]
+    brief: >
+      28M product manager in Delhi. Direct, witty takes. Uses emoji sparingly.
+    extra_info: >
+      Sports and reality TV fan.
+
+knowledge:
+  static:
+    - inline: >
+        This app is about reality TV predictions.
+      max_chars: 500
+    - path: ./briefs/show_bible.md
+      max_chars: 800
+      extra_info: Cast and format only.
+  tools:
+    - name: show_context
+      module: tools.my_app.show_context
+      description: Returns stable show metadata for a show_id argument.
+    - name: recent_episode
+      module: tools.my_app.recent_episode
+      description: Returns summary of the most recent aired episode.
+
+logging:
+  level: info
+  file: ./logs/hypeagent.log
+  console: true

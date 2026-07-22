@@ -1,0 +1,24 @@
+version: 1
+
+name: bad-account-ref
+platform:
+  connector: reddit
+  base_url: https://oauth.reddit.com
+  user_agent: hypeagent/1.0
+llm:
+  base_url: https://openrouter.ai/api/v1
+  model: openai/gpt-4o-mini
+budgets:
+  llm_daily_usd: 2.0
+  llm_total_usd: 50.0
+run:
+  agents:
+    - priya_blr
+  per_agent:
+    replies: 1
+targeting:
+  strategy: recent
+personas:
+  priya_blr:
+    account: nonexistent_account
+    brief: Test persona.
