@@ -8,6 +8,7 @@ import typer
 
 from hypeagent.config.loader import ConfigError, load_config
 from hypeagent.config.secrets import SecretsError, load_secrets, validate_account_refs
+from hypeagent.platforms.registry import ConnectorLoadError, load_connector
 
 
 def run_validate(config_path: Path, secrets_path: Path) -> None:
@@ -29,6 +30,14 @@ def run_validate(config_path: Path, secrets_path: Path) -> None:
     account_count = len(secrets.accounts)
     suffix = "s" if account_count != 1 else ""
     typer.echo(f"✓ secrets.local.yaml loaded ({account_count} account{suffix})")
+
+    try:
+        connector_cls = load_connector(config.platform.connector)
+    except ConnectorLoadError as exc:
+        typer.secho(f"✗ connector: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"✓ connector {connector_cls.name!r} importable")
 
     account_errors = validate_account_refs(config.personas, secrets)
     if account_errors:

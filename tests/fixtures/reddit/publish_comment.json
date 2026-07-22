@@ -1,0 +1,22 @@
+{
+  "json": {
+    "errors": [],
+    "data": {
+      "things": [
+        {
+          "kind": "t1",
+          "data": {
+            "id": "newcmt",
+            "name": "t1_newcmt",
+            "parent_id": "t1_cmt001",
+            "author": "priya_bot",
+            "author_fullname": "t2_abc123",
+            "body": "Arre bhai disagree, X ki game strong hai",
+            "created_utc": 1721600300.0,
+            "permalink": "/r/test/comments/abc123/who_gets_evicted/newcmt/"
+          }
+        }
+      ]
+    }
+  }
+}
