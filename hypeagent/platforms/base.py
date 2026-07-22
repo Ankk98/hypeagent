@@ -66,6 +66,7 @@ class PlatformConnector(ABC):
         contents: list[Content],
         strategy: TargetingConfig,
     ) -> list[Content]:
-        """Default: passthrough until targeting registry is wired (Phase 5)."""
-        _ = (ctx, strategy)
-        return contents
+        """Default: delegate to targeting registry."""
+        from hypeagent.targeting.registry import apply_strategy
+
+        return apply_strategy(strategy.strategy, contents, ctx, strategy.params)
