@@ -19,7 +19,7 @@ FIXTURES = Path("tests/fixtures")
 def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert result.stdout.strip() == "0.1.0"
+    assert result.stdout.strip() == "0.2.0"
 
 
 def test_validate_example_passes() -> None:

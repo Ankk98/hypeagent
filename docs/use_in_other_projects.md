@@ -63,7 +63,6 @@ cd /path/to/resume-maker/seed/hypeagent
 
 cat > requirements.txt <<'EOF'
 # Prefer PyPI once published: hypeagent>=0.2.0
-# Reactions / ActionSpec live on branch v0.2 until merged to main.
 hypeagent @ git+https://github.com/Ankk98/hypeagent.git@v0.2
 EOF
 
@@ -144,7 +143,7 @@ Point config at the connector:
 platform:
   connector: ./platforms/my_app.py
   base_url: http://localhost:4000
-  user_agent: hypeagent/0.1 (my-app-local)
+  user_agent: hypeagent/0.2 (my-app-local)
 ```
 
 See [Connector guide](../platforms/README.md) and [Config reference](config_reference.md).

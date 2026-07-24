@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-25
+
+Engagement actions: typed reactions, scalar votes, ActionSpec DSL, and multi-action
+quotas per agent (e.g. comment **and** react on the same post in one run).
+
+> **Alpha:** APIs, config schema, and CLI behavior may change before v1.0.
+
 ### Added
 
 - **Reactions (Phase B)** — Config `per_agent.reactions` + `engagement.reactions`, planner strategies (`weighted` / `random` / `llm_choose` / `persona_affinity`), kind-aware approval UI, SQLite `payload_json` / target columns, and validate-time capability checks.
-- **Typed-reaction connector (Phase C)** — Added a documented custom connector example with post/comment reaction capabilities, base `publish_reaction()` hook used by `execute(REACT)`, cached `current_engagement()` state for safe toggle handling, and integration tests against a mock API.
+- **Typed-reaction connector (Phase C)** — Documented custom connector example with post/comment reaction capabilities, base `publish_reaction()` hook used by `execute(REACT)`, cached `current_engagement()` state for safe toggle handling, and integration tests against a mock API.
 - **Votes + Reddit (Phase D)** — Config `per_agent.votes` + `engagement.votes`, planner/approval for scalar votes, base `publish_vote()` hook, and Reddit `POST /api/vote` with `myVote` engagement state.
+- **Multi-action quota loop** — Each agent picks one post, then runs plan → publish until `per_agent` quotas are exhausted (or `max_actions_per_run`), so `comments: 1` + `reactions: 1` yields both on the same content.
+- **Use-in-other-projects guide** — Step-by-step install as a declared dependency with committed connector/config in product repos.
 
 ### Changed
 
@@ -42,4 +51,5 @@ First alpha release of hypeagent — a standalone CLI for running LLM-powered pe
 
 - Secrets paths and tokens are never logged; TLS verification is always enabled for HTTP calls.
 
+[0.2.0]: https://github.com/Ankk98/hypeagent/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Ankk98/hypeagent/releases/tag/v0.1.0

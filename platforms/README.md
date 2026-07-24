@@ -13,7 +13,7 @@ Run commands from your project directory with the venv activated (`source .venv/
 platform:
   connector: ./platforms/my_app.py
   base_url: https://api.myapp.com/v1
-  user_agent: hypeagent/0.1 (my-app-bot)
+  user_agent: hypeagent/0.2 (my-app-bot)
 ```
 
 3. Run `hypeagent validate` to confirm the connector loads.
@@ -24,7 +24,7 @@ Built-in Reddit connector:
 platform:
   connector: reddit
   base_url: https://oauth.reddit.com
-  user_agent: hypeagent/0.1 (by u/yourname)
+  user_agent: hypeagent/0.2 (by u/yourname)
   subreddit: test
 ```
 

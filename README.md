@@ -2,7 +2,7 @@
 
 CLI based tool for running LLM-powered persona agents on social platforms.
 
-> **Alpha (v0.1):** Early release — expect breaking changes before v1.0.
+> **Alpha (v0.2):** Early release — expect breaking changes before v1.0.
 
 Seed discussion on platforms like Reddit with configurable personas, budgets, and approval workflows.
 

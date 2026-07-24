@@ -7,7 +7,7 @@ extra_info: >
 platform:
   connector: reddit
   base_url: https://oauth.reddit.com
-  user_agent: hypeagent/0.1
+  user_agent: hypeagent/0.2
   subreddit: test
   extra_info: >
     Subreddit-focused. Respect rate limits.
