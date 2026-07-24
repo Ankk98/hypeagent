@@ -116,6 +116,7 @@ class ProposedAction:
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     reaction_type: str | None = None
+    vote_value: int | None = None
     target_kind: ActionTargetKind | None = None
     target_id: str | None = None
     payload_json: str | None = None
@@ -135,6 +136,23 @@ class ProposedAction:
             )
             return ActionSpec(
                 kind=ActionKind.REACT,
+                content_id=self.content_id,
+                target=ActionTarget(kind=target_kind, id=target_id, preview=preview),
+                payload=payload,
+            )
+        if self.action_type == ActionKind.VOTE:
+            payload = ActionPayload.from_json(self.payload_json)
+            if self.vote_value is not None and payload.vote_value is None:
+                payload = ActionPayload(vote_value=self.vote_value)
+            target_kind = self.target_kind or ActionTargetKind.CONTENT
+            target_id = self.target_id or self.content_id
+            preview = (
+                self.parent_comment_preview
+                if target_kind == ActionTargetKind.COMMENT
+                else self.content_body_preview
+            )
+            return ActionSpec(
+                kind=ActionKind.VOTE,
                 content_id=self.content_id,
                 target=ActionTarget(kind=target_kind, id=target_id, preview=preview),
                 payload=payload,
@@ -162,9 +180,13 @@ class ProposedAction:
         )
 
     def display_preview(self) -> str:
-        """Short label for logs / memory (draft text or reaction type)."""
+        """Short label for logs / memory (draft text, reaction type, or vote)."""
         if self.action_type == ActionKind.REACT:
             return self.reaction_type or ""
+        if self.action_type == ActionKind.VOTE:
+            if self.vote_value is None:
+                return ""
+            return str(self.vote_value)
         return self.draft_text
 
 

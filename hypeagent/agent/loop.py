@@ -244,6 +244,14 @@ class AgentRunner:
                 content=content,
                 spec=spec,
             )
+        elif spec.kind == ActionKind.VOTE:
+            proposed = self._build_vote_proposed(
+                run_id=run_id,
+                agent_id=agent_id,
+                persona_account=persona.account,
+                content=content,
+                spec=spec,
+            )
         else:
             parent = _resolve_parent(thread, spec)
             draft_result = drafter.draft(ctx, thread, spec.kind, parent)
@@ -333,6 +341,43 @@ class AgentRunner:
             payload_json=spec.payload.to_json(),
         )
 
+    def _build_vote_proposed(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        persona_account: str,
+        content: Content,
+        spec: ActionSpec,
+    ) -> ProposedAction:
+        vote_value = spec.payload.vote_value
+        parent_comment_id = (
+            spec.target.id if spec.target.kind == ActionTargetKind.COMMENT else None
+        )
+        parent_preview = (
+            spec.target.preview if spec.target.kind == ActionTargetKind.COMMENT else None
+        )
+        return ProposedAction(
+            run_id=run_id,
+            agent_id=agent_id,
+            account_id=persona_account,
+            action_type=ActionKind.VOTE,
+            content_id=content.id,
+            content_body_preview=RunsRepository.preview_text(content.body),
+            parent_comment_id=parent_comment_id,
+            parent_comment_preview=parent_preview,
+            draft_text="",
+            targeting_strategy=self._config.targeting.strategy,
+            llm_model="",
+            llm_tokens_in=0,
+            llm_tokens_out=0,
+            llm_cost_usd=0.0,
+            vote_value=vote_value,
+            target_kind=spec.target.kind,
+            target_id=spec.target.id,
+            payload_json=spec.payload.to_json(),
+        )
+
     def _handle_publish_mode(
         self,
         *,
@@ -355,6 +400,18 @@ class AgentRunner:
                     proposed.action_type.value,
                     proposed.content_id,
                     proposed.reaction_type,
+                    proposed.target_kind.value if proposed.target_kind else None,
+                    proposed.target_id,
+                )
+            elif proposed.action_type == ActionKind.VOTE:
+                self._logger.info(
+                    "run_id=%s agent=%s event=dry_run action=%s content_id=%s "
+                    "vote=%s target_kind=%s target_id=%s",
+                    proposed.run_id,
+                    proposed.agent_id,
+                    proposed.action_type.value,
+                    proposed.content_id,
+                    proposed.vote_value,
                     proposed.target_kind.value if proposed.target_kind else None,
                     proposed.target_id,
                 )
@@ -386,6 +443,16 @@ class AgentRunner:
                     proposed.reaction_type = response.reaction_type
                     proposed.payload_json = ActionPayload(
                         reaction_type=response.reaction_type
+                    ).to_json()
+                    runs_repo.update_reaction(action_id, proposed.payload_json)
+            elif proposed.action_type == ActionKind.VOTE:
+                if (
+                    response.vote_value is not None
+                    and response.vote_value != proposed.vote_value
+                ):
+                    proposed.vote_value = response.vote_value
+                    proposed.payload_json = ActionPayload(
+                        vote_value=response.vote_value
                     ).to_json()
                     runs_repo.update_reaction(action_id, proposed.payload_json)
             elif response.draft_text != proposed.draft_text:

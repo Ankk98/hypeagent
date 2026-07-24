@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Reactions (Phase B)** — Config `per_agent.reactions` + `engagement.reactions`, planner strategies (`weighted` / `random` / `llm_choose` / `persona_affinity`), kind-aware approval UI, SQLite `payload_json` / target columns, and validate-time capability checks.
 - **Typed-reaction connector (Phase C)** — Added a documented custom connector example with post/comment reaction capabilities, base `publish_reaction()` hook used by `execute(REACT)`, cached `current_engagement()` state for safe toggle handling, and integration tests against a mock API.
+- **Votes + Reddit (Phase D)** — Config `per_agent.votes` + `engagement.votes`, planner/approval for scalar votes, base `publish_vote()` hook, and Reddit `POST /api/vote` with `myVote` engagement state.
 
 ### Changed
 

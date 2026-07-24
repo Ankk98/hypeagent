@@ -13,6 +13,7 @@ import pytest
 from hypeagent.config.loader import load_config
 from hypeagent.config.schema import HttpConfig, PlatformConfig
 from hypeagent.config.secrets_schema import AccountSecret, Secrets
+from hypeagent.models.action import ActionTarget, ActionTargetKind
 from hypeagent.models.run import RunContext, RunMode
 from hypeagent.platforms.base import PlatformError
 from hypeagent.platforms.http_client import HttpClient
@@ -37,6 +38,8 @@ def _reddit_transport() -> httpx.MockTransport:
             return httpx.Response(200, json=_load_fixture("thread.json"))
         if path == "/api/comment":
             return httpx.Response(200, json=_load_fixture("publish_comment.json"))
+        if path == "/api/vote":
+            return httpx.Response(200, json={})
         return httpx.Response(404, text=f"unexpected path: {path}")
 
     return httpx.MockTransport(handler)
@@ -133,6 +136,43 @@ def test_publish_comment_reply(run_context: RunContext, reddit_connector: Reddit
     assert comment.id == "newcmt"
     assert comment.content_id == "abc123"
     assert "disagree" in comment.body
+
+
+def test_capabilities_advertise_votes(reddit_connector: RedditConnector) -> None:
+    votes = reddit_connector.capabilities().votes
+    assert votes is not None
+    assert votes.mode == "set"
+    assert votes.allowed_values == {1, -1, 0}
+    assert ActionTargetKind.CONTENT in votes.target_kinds
+
+
+def test_publish_vote_on_content(
+    run_context: RunContext,
+    reddit_connector: RedditConnector,
+) -> None:
+    result = reddit_connector.publish_vote(
+        run_context,
+        ActionTarget(ActionTargetKind.CONTENT, "abc123"),
+        1,
+    )
+    assert result.platform_object_id == "t3_abc123"
+    assert result.raw == {"id": "t3_abc123", "dir": 1}
+    assert reddit_connector.current_engagement(
+        run_context,
+        ActionTarget(ActionTargetKind.CONTENT, "abc123"),
+    )["myVote"] == 1
+
+
+def test_current_engagement_reads_likes_from_thread(
+    run_context: RunContext,
+    reddit_connector: RedditConnector,
+) -> None:
+    engagement = reddit_connector.current_engagement(
+        run_context,
+        ActionTarget(ActionTargetKind.CONTENT, "abc123"),
+    )
+    # Fixture posts omit likes → treated as not voted yet.
+    assert engagement.get("myVote") is None
 
 
 def test_can_reply_respects_depth(

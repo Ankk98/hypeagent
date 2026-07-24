@@ -68,6 +68,8 @@ def run_validate(config_path: Path, secrets_path: Path) -> None:
         raise typer.Exit(code=1)
     if config.reactions_requested():
         typer.echo("✓ engagement reactions compatible with connector capabilities")
+    if config.votes_requested():
+        typer.echo("✓ engagement votes compatible with connector capabilities")
 
     typer.echo(
         f"✓ budgets: daily=${config.budgets.llm_daily_usd:.2f} "
@@ -81,7 +83,7 @@ def _validate_engagement(
     connector_cls: type[PlatformConnector],
     secrets: Secrets,
 ) -> list[str]:
-    if not config.reactions_requested():
+    if not config.reactions_requested() and not config.votes_requested():
         return []
 
     first_agent = config.run.agents[0]

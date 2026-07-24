@@ -10,9 +10,15 @@ from urllib.parse import urljoin
 
 from hypeagent.config.schema import HttpConfig, PlatformConfig
 from hypeagent.config.secrets_schema import AccountSecret
+from hypeagent.models.action import ActionTarget, ActionTargetKind, PublishResult
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext
-from hypeagent.platforms.base import PlatformConnector, PlatformError
+from hypeagent.platforms.base import (
+    PlatformCapabilities,
+    PlatformConnector,
+    PlatformError,
+    VoteCapability,
+)
 from hypeagent.platforms.http_client import HttpClient
 
 REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
@@ -41,10 +47,23 @@ class RedditConnector(PlatformConnector):
         self._owns_http = http_client is None
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0
+        self._engagement: dict[tuple[ActionTargetKind, str], dict[str, Any]] = {}
 
     def close(self) -> None:
         if self._owns_http:
             self._http.close()
+
+    def capabilities(self) -> PlatformCapabilities:
+        return PlatformCapabilities(
+            votes=VoteCapability(
+                target_kinds=frozenset(
+                    {ActionTargetKind.CONTENT, ActionTargetKind.COMMENT}
+                ),
+                allowed_values=frozenset({1, -1, 0}),
+                mode="set",
+                max_per_entity=1,
+            )
+        )
 
     def list_contents(self, ctx: RunContext, *, since: datetime) -> list[Content]:
         url = urljoin(self._base_url, f"r/{self._subreddit}/new")
@@ -137,6 +156,54 @@ class RedditConnector(PlatformConnector):
         )
         return comment
 
+    def publish_vote(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+        vote_value: int,
+    ) -> PublishResult:
+        if target.kind == ActionTargetKind.CONTENT:
+            thing_id = f"t3_{self._normalize_post_id(target.id)}"
+        else:
+            thing_id = self._normalize_comment_id(target.id)
+
+        url = urljoin(self._base_url, "api/vote")
+        response = self._http.post(
+            url,
+            headers={**self._auth_headers(), "Content-Type": "application/x-www-form-urlencoded"},
+            data={"id": thing_id, "dir": str(vote_value)},
+        )
+        self._raise_for_status(response, "publish_vote")
+        self._engagement[(target.kind, target.id)] = {"myVote": vote_value}
+        ctx.logger.info(
+            "event=reddit_publish_vote target_kind=%s target_id=%s vote=%s thing=%s",
+            target.kind.value,
+            target.id,
+            vote_value,
+            thing_id,
+        )
+        return PublishResult(
+            platform_object_id=thing_id,
+            raw={"id": thing_id, "dir": vote_value},
+        )
+
+    def current_engagement(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+    ) -> dict[str, Any]:
+        cached = self._engagement.get((target.kind, target.id))
+        if cached is not None:
+            return dict(cached)
+
+        if target.kind == ActionTargetKind.CONTENT:
+            self.get_thread(ctx, target.id)
+            return dict(self._engagement.get((target.kind, target.id), {}))
+
+        # Comment votes may only be known after the parent thread was loaded.
+        _ = ctx
+        return {}
+
     def _auth_headers(self) -> dict[str, str]:
         token = self._ensure_access_token()
         return {"Authorization": f"Bearer {token}"}
@@ -181,6 +248,8 @@ class RedditConnector(PlatformConnector):
         selftext = str(data.get("selftext", ""))
         body = title if not selftext else f"{title}\n\n{selftext}"
         created_utc = float(data.get("created_utc", 0))
+        my_vote = self._likes_to_vote(data.get("likes"))
+        self._engagement[(ActionTargetKind.CONTENT, post_id)] = {"myVote": my_vote}
         return Content(
             id=post_id,
             kind="post",
@@ -194,6 +263,8 @@ class RedditConnector(PlatformConnector):
                 "subreddit": data.get("subreddit"),
                 "permalink": data.get("permalink"),
                 "url": data.get("url"),
+                "likes": data.get("likes"),
+                "myVote": my_vote,
             },
         )
 
@@ -247,6 +318,8 @@ class RedditConnector(PlatformConnector):
             resolved_parent = parent_fullname.removeprefix("t1_")
 
         created_utc = float(data.get("created_utc", 0))
+        my_vote = self._likes_to_vote(data.get("likes"))
+        self._engagement[(ActionTargetKind.COMMENT, comment_id)] = {"myVote": my_vote}
         return Comment(
             id=comment_id,
             content_id=content_id,
@@ -259,6 +332,8 @@ class RedditConnector(PlatformConnector):
             metadata={
                 "name": data.get("name"),
                 "permalink": data.get("permalink"),
+                "likes": data.get("likes"),
+                "myVote": my_vote,
             },
         )
 
@@ -269,6 +344,14 @@ class RedditConnector(PlatformConnector):
                 data = thing.get("data")
                 if isinstance(data, dict):
                     return data
+        return None
+
+    @staticmethod
+    def _likes_to_vote(likes: Any) -> int | None:
+        if likes is True:
+            return 1
+        if likes is False:
+            return -1
         return None
 
     @staticmethod

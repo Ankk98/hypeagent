@@ -5,6 +5,7 @@ from hypeagent.platforms.base import (
     PlatformConnector,
     PlatformError,
     ReactionCapability,
+    VoteCapability,
 )
 from hypeagent.platforms.registry import load_connector
 
@@ -13,5 +14,6 @@ __all__ = [
     "PlatformConnector",
     "PlatformError",
     "ReactionCapability",
+    "VoteCapability",
     "load_connector",
 ]

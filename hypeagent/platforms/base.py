@@ -26,11 +26,21 @@ class PlatformError(Exception):
 
 @dataclass(frozen=True)
 class ReactionCapability:
-    """Connector-declared reaction (or vote) support."""
+    """Connector-declared reaction support."""
 
     target_kinds: frozenset[ActionTargetKind]
     allowed_types: frozenset[str]
     mode: Literal["toggle", "set", "additive"]
+    max_per_entity: int | None = 1
+
+
+@dataclass(frozen=True)
+class VoteCapability:
+    """Connector-declared scalar vote support (e.g. Reddit upvote/downvote)."""
+
+    target_kinds: frozenset[ActionTargetKind]
+    allowed_values: frozenset[int]
+    mode: Literal["toggle", "set", "additive"] = "set"
     max_per_entity: int | None = 1
 
 
@@ -41,7 +51,7 @@ class PlatformCapabilities:
     text_comment: bool = True
     text_reply: bool = True
     reactions: ReactionCapability | None = None
-    votes: ReactionCapability | None = None
+    votes: VoteCapability | None = None
 
 
 class PlatformConnector(ABC):
@@ -95,8 +105,22 @@ class PlatformConnector(ABC):
         )
         raise PlatformError(msg)
 
+    def publish_vote(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+        vote_value: int,
+    ) -> PublishResult:
+        """Publish a scalar vote. Override when capabilities().votes is non-null."""
+        _ = ctx, target, vote_value
+        msg = (
+            f"Connector {self.name!r} advertises votes but does not implement "
+            "publish_vote()"
+        )
+        raise PlatformError(msg)
+
     def execute(self, ctx: RunContext, spec: ActionSpec) -> PublishResult:
-        """Publish an ActionSpec. Default routes COMMENT/REPLY/REACT to helpers."""
+        """Publish an ActionSpec. Default routes COMMENT/REPLY/REACT/VOTE to helpers."""
         if spec.kind in (ActionKind.COMMENT, ActionKind.REPLY):
             text = spec.payload.text
             if not text:
@@ -140,9 +164,27 @@ class PlatformConnector(ABC):
                 )
                 raise PlatformError(msg)
             return self.publish_reaction(ctx, spec.target, reaction_type)
-        if spec.kind == ActionKind.VOTE and caps.votes is None:
-            msg = f"Connector {self.name!r} does not support votes"
-            raise PlatformError(msg)
+        if spec.kind == ActionKind.VOTE:
+            if caps.votes is None:
+                msg = f"Connector {self.name!r} does not support votes"
+                raise PlatformError(msg)
+            vote_value = spec.payload.vote_value
+            if vote_value is None:
+                msg = "ActionSpec kind=vote requires payload.vote_value"
+                raise PlatformError(msg)
+            if vote_value not in caps.votes.allowed_values:
+                msg = (
+                    f"Vote value {vote_value!r} is not in connector "
+                    f"{self.name!r} allowlist"
+                )
+                raise PlatformError(msg)
+            if spec.target.kind not in caps.votes.target_kinds:
+                msg = (
+                    f"Connector {self.name!r} cannot vote on target kind "
+                    f"{spec.target.kind.value!r}"
+                )
+                raise PlatformError(msg)
+            return self.publish_vote(ctx, spec.target, vote_value)
         msg = f"Unsupported action kind for execute(): {spec.kind.value}"
         raise PlatformError(msg)
 

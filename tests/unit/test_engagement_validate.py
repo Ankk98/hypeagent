@@ -5,7 +5,7 @@ from __future__ import annotations
 from hypeagent.config.engagement import validate_engagement_against_capabilities
 from hypeagent.config.schema import HypeagentConfig
 from hypeagent.models.action import ActionTargetKind
-from hypeagent.platforms.base import PlatformCapabilities, ReactionCapability
+from hypeagent.platforms.base import PlatformCapabilities, ReactionCapability, VoteCapability
 
 
 def _config(**overrides: object) -> HypeagentConfig:
@@ -51,6 +51,33 @@ def _caps(*, types: set[str] | None = None) -> PlatformCapabilities:
     )
 
 
+def _vote_config(**overrides: object) -> HypeagentConfig:
+    return _config(
+        run={
+            "agents": ["alice"],
+            "per_agent": {"comments": 0, "replies": 0, "reactions": 0, "votes": 1},
+        },
+        engagement={
+            "votes": {
+                "enabled": True,
+                "targets": ["content"],
+                "values": [1],
+            }
+        },
+        **overrides,
+    )
+
+
+def _vote_caps(*, values: set[int] | None = None) -> PlatformCapabilities:
+    return PlatformCapabilities(
+        votes=VoteCapability(
+            target_kinds=frozenset({ActionTargetKind.CONTENT}),
+            allowed_values=frozenset(values or {1, -1, 0}),
+            mode="set",
+        )
+    )
+
+
 class TestValidateEngagement:
     def test_ok_when_subset(self) -> None:
         assert validate_engagement_against_capabilities(_config(), _caps()) == []
@@ -86,3 +113,26 @@ class TestValidateEngagement:
         )
         errors = validate_engagement_against_capabilities(config, _caps())
         assert any("comment" in e for e in errors)
+
+    def test_votes_ok_when_subset(self) -> None:
+        assert validate_engagement_against_capabilities(_vote_config(), _vote_caps()) == []
+
+    def test_votes_rejects_missing_capability(self) -> None:
+        errors = validate_engagement_against_capabilities(
+            _vote_config(),
+            PlatformCapabilities(),
+        )
+        assert any("capabilities().votes" in e for e in errors)
+
+    def test_votes_rejects_unknown_values(self) -> None:
+        bad = _config(
+            run={
+                "agents": ["alice"],
+                "per_agent": {"comments": 0, "replies": 0, "reactions": 0, "votes": 1},
+            },
+            engagement={
+                "votes": {"enabled": True, "targets": ["content"], "values": [1, -1]}
+            },
+        )
+        errors = validate_engagement_against_capabilities(bad, _vote_caps(values={1}))
+        assert any("-1" in e for e in errors)

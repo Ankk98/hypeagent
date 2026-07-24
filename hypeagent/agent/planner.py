@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from hypeagent.agent.reactions import choose_reaction_type, resolve_allowed_types
+from hypeagent.agent.votes import choose_vote_value, resolve_allowed_values
 from hypeagent.config.schema import (
     DEFAULT_ACTION_PRIORITY,
     ActionPriorityName,
     PerAgentConfig,
+    ReactionTargetName,
 )
 from hypeagent.models.action import (
     ActionKind,
@@ -20,7 +23,7 @@ from hypeagent.models.action import (
 )
 from hypeagent.models.content import Comment, Thread
 from hypeagent.models.run import RunContext
-from hypeagent.platforms.base import ReactionCapability
+from hypeagent.platforms.base import ReactionCapability, VoteCapability
 
 _PRIORITY_TO_KIND: dict[ActionPriorityName, ActionKind] = {
     "reply": ActionKind.REPLY,
@@ -91,6 +94,19 @@ def _react_spec(
     )
 
 
+def _vote_spec(
+    thread: Thread,
+    target: ActionTarget,
+    vote_value: int,
+) -> ActionSpec:
+    return ActionSpec(
+        kind=ActionKind.VOTE,
+        content_id=thread.content.id,
+        target=target,
+        payload=ActionPayload(vote_value=vote_value),
+    )
+
+
 class Planner:
     """Decide action kind from quotas ∩ capabilities ∩ engagement config."""
 
@@ -103,8 +119,8 @@ class Planner:
         """
         Try kinds in action_priority order (default: reply → comment → reaction → vote).
 
-        REPLY/COMMENT keep prior eligibility rules. REACT uses engagement config and
-        connector reaction capabilities. VOTE is reserved for a later phase.
+        REPLY/COMMENT keep prior eligibility rules. REACT/VOTE use engagement config and
+        connector capabilities.
         """
         priority = ctx.config.run.action_priority or list(DEFAULT_ACTION_PRIORITY)
         for name in priority:
@@ -115,6 +131,8 @@ class Planner:
                 decision = self._try_comment(per_agent, thread)
             elif kind == ActionKind.REACT:
                 decision = self._try_react(per_agent, thread, ctx)
+            elif kind == ActionKind.VOTE:
+                decision = self._try_vote(per_agent, thread, ctx)
             else:
                 decision = None
             if decision is not None:
@@ -167,7 +185,14 @@ class Planner:
         if not allowed_types:
             return None
 
-        targets = self._reaction_targets(thread, ctx, caps)
+        targets = self._engagement_targets(
+            thread,
+            ctx,
+            caps,
+            targets=reaction_cfg.targets,
+            avoid_authors=set(reaction_cfg.avoid_content_author_ids),
+            skip_if_key="myReaction" if reaction_cfg.skip_if_already_reacted else None,
+        )
         if not targets:
             return None
 
@@ -185,17 +210,54 @@ class Planner:
             return None
         return PlannerDecision(_react_spec(thread, target, reaction_type))
 
-    def _reaction_targets(
+    def _try_vote(
+        self,
+        per_agent: PerAgentConfig,
+        thread: Thread,
+        ctx: RunContext,
+    ) -> PlannerDecision | None:
+        if per_agent.votes <= 0:
+            return None
+
+        caps = ctx.connector.capabilities().votes
+        if caps is None:
+            return None
+
+        vote_cfg = ctx.config.engagement.votes
+        allowed_values = resolve_allowed_values(vote_cfg, caps.allowed_values)
+        if not allowed_values:
+            return None
+
+        targets = self._engagement_targets(
+            thread,
+            ctx,
+            caps,
+            targets=vote_cfg.targets,
+            avoid_authors=set(vote_cfg.avoid_content_author_ids),
+            skip_if_key="myVote" if vote_cfg.skip_if_already_voted else None,
+        )
+        if not targets:
+            return None
+
+        target = random.choice(targets)
+        vote_value = choose_vote_value(allowed_values)
+        if vote_value is None:
+            return None
+        return PlannerDecision(_vote_spec(thread, target, vote_value))
+
+    def _engagement_targets(
         self,
         thread: Thread,
         ctx: RunContext,
-        caps: ReactionCapability,
+        caps: ReactionCapability | VoteCapability,
+        *,
+        targets: Sequence[ReactionTargetName],
+        avoid_authors: set[str],
+        skip_if_key: str | None,
     ) -> list[ActionTarget]:
-        reaction_cfg = ctx.config.engagement.reactions
-        avoid_authors = set(reaction_cfg.avoid_content_author_ids)
         candidates: list[ActionTarget] = []
 
-        for target_name in reaction_cfg.targets:
+        for target_name in targets:
             kind = _TARGET_NAME_TO_KIND[target_name]
             if kind not in caps.target_kinds:
                 continue
@@ -207,7 +269,7 @@ class Planner:
                     id=thread.content.id,
                     preview=_preview(thread.content.body),
                 )
-                if self._reaction_target_ok(ctx, target, reaction_cfg.skip_if_already_reacted):
+                if self._engagement_target_ok(ctx, target, skip_if_key):
                     candidates.append(target)
             elif kind == ActionTargetKind.COMMENT:
                 for comment in thread.comments:
@@ -218,20 +280,17 @@ class Planner:
                         id=comment.id,
                         preview=_preview(comment.body),
                     )
-                    if self._reaction_target_ok(
-                        ctx, target, reaction_cfg.skip_if_already_reacted
-                    ):
+                    if self._engagement_target_ok(ctx, target, skip_if_key):
                         candidates.append(target)
         return candidates
 
-    def _reaction_target_ok(
+    def _engagement_target_ok(
         self,
         ctx: RunContext,
         target: ActionTarget,
-        skip_if_already: bool,
+        skip_if_key: str | None,
     ) -> bool:
-        if not skip_if_already:
+        if skip_if_key is None:
             return True
         engagement = ctx.connector.current_engagement(ctx, target)
-        my_reaction = engagement.get("myReaction")
-        return not my_reaction
+        return engagement.get(skip_if_key) is None

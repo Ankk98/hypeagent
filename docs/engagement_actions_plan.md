@@ -1,6 +1,6 @@
 # Plan: Flexible engagement actions (reactions and beyond)
 
-**Status:** Phases A–C implemented (Phase C includes the tested custom typed-reaction connector example; live API approval remains an operator check); Phases D–E not started
+**Status:** Phases A–D implemented (Phase D adds votes config + Reddit `POST /api/vote`; Phase C live API approve remains an operator check); Phase E not started
 **Scope:** Extend hypeagent beyond comment/reply so connectors can publish platform-native engagement (reactions, votes, likes, etc.) without hard-coding one app’s API into the core.  
 **Primary motivator:** Social platforms commonly support non-text engagement such as typed reactions, likes, and votes on posts and comments.  
 **Related:** Current v1 locks actions to `comment` / `reply` only ([implementation plan §1](./implementation_plan.md)).
@@ -483,8 +483,8 @@ def capabilities(self) -> PlatformCapabilities:
 
 ### Phase D — Votes + Reddit
 
-- `engagement.votes` + Reddit `POST /api/vote`.
-- Optional scalar-vote support for custom connectors.
+- ✅ `engagement.votes` + Reddit `POST /api/vote`.
+- ✅ Optional scalar-vote support for custom connectors (`VoteCapability` + `publish_vote`).
 
 ### Phase E — Multi-action per agent / richer targets (later)
 

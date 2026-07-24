@@ -16,6 +16,7 @@ from hypeagent.platforms.base import (
     PlatformCapabilities,
     PlatformConnector,
     ReactionCapability,
+    VoteCapability,
 )
 
 
@@ -26,11 +27,13 @@ class _StubConnector(PlatformConnector):
         self,
         *args: Any,
         reaction_caps: ReactionCapability | None = None,
+        vote_caps: VoteCapability | None = None,
         engagement: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._reaction_caps = reaction_caps
+        self._vote_caps = vote_caps
         self._engagement = engagement or {}
 
     def list_contents(self, ctx: RunContext, *, since: datetime) -> list[Content]:
@@ -49,7 +52,10 @@ class _StubConnector(PlatformConnector):
         raise NotImplementedError
 
     def capabilities(self) -> PlatformCapabilities:
-        return PlatformCapabilities(reactions=self._reaction_caps)
+        return PlatformCapabilities(
+            reactions=self._reaction_caps,
+            votes=self._vote_caps,
+        )
 
     def current_engagement(
         self, ctx: RunContext, target: ActionTarget
@@ -62,6 +68,7 @@ def _run_context(
     *,
     reply_depth_max: int = 2,
     reaction_caps: ReactionCapability | None = None,
+    vote_caps: VoteCapability | None = None,
     engagement_cfg: dict[str, object] | None = None,
     engagement_state: dict[str, Any] | None = None,
     action_priority: list[str] | None = None,
@@ -110,6 +117,7 @@ def _run_context(
             secrets.accounts["alice"],
             config.http,
             reaction_caps=reaction_caps,
+            vote_caps=vote_caps,
             engagement=engagement_state,
         ),
         db=object(),
@@ -258,3 +266,54 @@ class TestPlanner:
         )
         assert decision is not None
         assert decision.spec.kind == ActionKind.COMMENT
+
+    def test_vote_when_vote_quota_and_caps(self) -> None:
+        ctx = _run_context(
+            vote_caps=VoteCapability(
+                target_kinds=frozenset({ActionTargetKind.CONTENT}),
+                allowed_values=frozenset({1, -1, 0}),
+                mode="set",
+            ),
+            engagement_cfg={
+                "votes": {
+                    "enabled": True,
+                    "targets": ["content"],
+                    "values": [1],
+                }
+            },
+            action_priority=["vote", "comment", "reply"],
+        )
+        decision = Planner().decide(
+            PerAgentConfig(comments=0, replies=0, votes=1),
+            _thread(),
+            ctx,
+        )
+        assert decision is not None
+        assert decision.spec.kind == ActionKind.VOTE
+        assert decision.spec.target.kind == ActionTargetKind.CONTENT
+        assert decision.spec.payload.vote_value == 1
+
+    def test_vote_skips_when_already_voted(self) -> None:
+        ctx = _run_context(
+            vote_caps=VoteCapability(
+                target_kinds=frozenset({ActionTargetKind.CONTENT}),
+                allowed_values=frozenset({1}),
+                mode="set",
+            ),
+            engagement_cfg={
+                "votes": {
+                    "enabled": True,
+                    "targets": ["content"],
+                    "values": [1],
+                    "skip_if_already_voted": True,
+                }
+            },
+            engagement_state={"post1": {"myVote": 1}},
+            action_priority=["vote"],
+        )
+        decision = Planner().decide(
+            PerAgentConfig(votes=1, comments=0, replies=0),
+            _thread(),
+            ctx,
+        )
+        assert decision is None

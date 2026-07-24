@@ -84,6 +84,7 @@ Unknown keys are rejected. All `extra_info` fields are injected into LLM prompts
 | `per_agent.comments` | no (default `0`) | Top-level comments per agent per run |
 | `per_agent.replies` | no (default `1`) | Thread replies per agent per run |
 | `per_agent.reactions` | no (default `0`) | Reaction publishes per agent per run |
+| `per_agent.votes` | no (default `0`) | Scalar vote publishes per agent per run |
 | `action_priority` | no | Kind order when multiple quotas remain: `reply`, `comment`, `reaction`, `vote` (default: that order) |
 | `reply_depth_max` | `2` | Max comment nesting depth for replies |
 | `extra_info` | no | Run-level rules for prompts |
@@ -127,6 +128,37 @@ engagement:
       insightful: 0.3
       like: 0.3
     skip_if_already_reacted: true
+```
+
+#### `engagement.votes`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Prefer explicit enable; also implied when `per_agent.votes > 0` for validation |
+| `targets` | `[content]` | Where to vote: `content`, `comment`, or both |
+| `values` | all connector-allowed | Subset of connector vote values (typically `-1`, `0`, `1`) |
+| `skip_if_already_voted` | `true` | Skip targets where `current_engagement` reports `myVote` |
+| `avoid_content_author_ids` | `[]` | Do not vote on content/comments by these author IDs |
+
+`hypeagent validate` fails if votes are requested (`per_agent.votes > 0` or `enabled: true`) but the connector does not advertise `capabilities().votes`, or if `values` / `targets` are outside the connector allowlist.
+
+Reddit example (upvote posts only):
+
+```yaml
+run:
+  per_agent:
+    comments: 0
+    replies: 0
+    reactions: 0
+    votes: 1
+  action_priority: [vote, reply, comment]
+
+engagement:
+  votes:
+    enabled: true
+    targets: [content]
+    values: [1]
+    skip_if_already_voted: true
 ```
 
 ### `targeting`

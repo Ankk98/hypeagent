@@ -59,6 +59,7 @@ class PerAgentConfig(StrictModel):
     comments: int = Field(default=0, ge=0)
     replies: int = Field(default=1, ge=0)
     reactions: int = Field(default=0, ge=0)
+    votes: int = Field(default=0, ge=0)
 
 
 ActionPriorityName = Literal["reply", "comment", "reaction", "vote"]
@@ -73,6 +74,10 @@ ReactionStrategyName = Literal["weighted", "random", "llm_choose", "persona_affi
 
 
 def _default_reaction_targets() -> list[ReactionTargetName]:
+    return ["content"]
+
+
+def _default_vote_targets() -> list[ReactionTargetName]:
     return ["content"]
 
 
@@ -102,8 +107,38 @@ class ReactionsEngagementConfig(StrictModel):
         return value
 
 
+class VotesEngagementConfig(StrictModel):
+    enabled: bool = False
+    targets: list[ReactionTargetName] = Field(default_factory=_default_vote_targets)
+    values: list[int] | None = None
+    skip_if_already_voted: bool = True
+    avoid_content_author_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("targets")
+    @classmethod
+    def non_empty_targets(cls, value: list[ReactionTargetName]) -> list[ReactionTargetName]:
+        if not value:
+            msg = "engagement.votes.targets must be non-empty"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("values")
+    @classmethod
+    def valid_values(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and not value:
+            msg = "engagement.votes.values must be non-empty when set"
+            raise ValueError(msg)
+        if value is not None:
+            unknown = sorted({v for v in value if v not in {-1, 0, 1}})
+            if unknown:
+                msg = f"engagement.votes.values must be -1, 0, or 1; got {unknown}"
+                raise ValueError(msg)
+        return value
+
+
 class EngagementConfig(StrictModel):
     reactions: ReactionsEngagementConfig = Field(default_factory=ReactionsEngagementConfig)
+    votes: VotesEngagementConfig = Field(default_factory=VotesEngagementConfig)
 
 
 class RunConfig(StrictModel):
@@ -194,6 +229,10 @@ class HypeagentConfig(StrictModel):
     def reactions_requested(self) -> bool:
         """True when config asks to publish reactions this run."""
         return self.run.per_agent.reactions > 0 or self.engagement.reactions.enabled
+
+    def votes_requested(self) -> bool:
+        """True when config asks to publish votes this run."""
+        return self.run.per_agent.votes > 0 or self.engagement.votes.enabled
 
 
 # Alias used in the implementation plan.

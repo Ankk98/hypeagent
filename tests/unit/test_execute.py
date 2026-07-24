@@ -26,6 +26,7 @@ from hypeagent.platforms.base import (
     PlatformConnector,
     PlatformError,
     ReactionCapability,
+    VoteCapability,
 )
 
 
@@ -183,6 +184,32 @@ class TestProposedActionToSpec:
         assert spec.kind == ActionKind.REACT
         assert spec.target.kind == ActionTargetKind.CONTENT
         assert spec.payload.reaction_type == "agree"
+
+    def test_vote_spec(self) -> None:
+        proposed = ProposedAction(
+            run_id="r1",
+            agent_id="alice",
+            account_id="alice",
+            action_type=ActionKind.VOTE,
+            content_id="post1",
+            content_body_preview="hello",
+            parent_comment_id=None,
+            parent_comment_preview=None,
+            draft_text="",
+            targeting_strategy="recent",
+            llm_model="",
+            llm_tokens_in=0,
+            llm_tokens_out=0,
+            llm_cost_usd=0.0,
+            vote_value=1,
+            target_kind=ActionTargetKind.CONTENT,
+            target_id="post1",
+            payload_json=ActionPayload(vote_value=1).to_json(),
+        )
+        spec = proposed.to_action_spec()
+        assert spec.kind == ActionKind.VOTE
+        assert spec.payload.vote_value == 1
+        assert proposed.display_preview() == "1"
 
 
 class TestConnectorExecute:
@@ -409,6 +436,60 @@ class TestConnectorExecute:
                     payload=ActionPayload(reaction_type="like"),
                 ),
             )
+
+    def test_execute_vote_routes_to_publish_vote(self) -> None:
+        class _VotingConnector(_StubConnector):
+            def capabilities(self) -> PlatformCapabilities:
+                return PlatformCapabilities(
+                    votes=VoteCapability(
+                        target_kinds=frozenset({ActionTargetKind.CONTENT}),
+                        allowed_values=frozenset({1, -1, 0}),
+                        mode="set",
+                    )
+                )
+
+            def publish_vote(
+                self,
+                ctx: RunContext,
+                target: ActionTarget,
+                vote_value: int,
+            ) -> PublishResult:
+                _ = ctx
+                self.publish_calls.append((target.id, str(vote_value), None))
+                return PublishResult(platform_object_id=f"vote-{vote_value}")
+
+        config = HypeagentConfig.model_validate(
+            {
+                "version": 1,
+                "name": "exec",
+                "platform": {
+                    "connector": "reddit",
+                    "base_url": "https://oauth.reddit.com",
+                    "user_agent": "hypeagent/1.0",
+                },
+                "llm": {
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "model": "openai/gpt-4o-mini",
+                },
+                "budgets": {"llm_daily_usd": 2.0, "llm_total_usd": 50.0},
+                "run": {"agents": ["alice"], "per_agent": {"votes": 1}},
+                "targeting": {"strategy": "recent"},
+                "personas": {"alice": {"account": "alice", "brief": "Test."}},
+            }
+        )
+        account = AccountSecret(user_id="u1", token="tok")
+        connector = _VotingConnector(config.platform, account, config.http)
+        result = connector.execute(
+            _ctx(connector),
+            ActionSpec(
+                kind=ActionKind.VOTE,
+                content_id="post1",
+                target=ActionTarget(kind=ActionTargetKind.CONTENT, id="post1"),
+                payload=ActionPayload(vote_value=1),
+            ),
+        )
+        assert result.platform_object_id == "vote-1"
+        assert connector.publish_calls == [("post1", "1", None)]
 
     def test_execute_comment_requires_text(self) -> None:
         config = HypeagentConfig.model_validate(

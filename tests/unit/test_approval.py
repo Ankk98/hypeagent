@@ -209,6 +209,66 @@ class TestApprovalPrompt:
         assert response.decision == ApprovalDecision.PUBLISH
         assert response.reaction_type == "like"
 
+    def test_vote_renders_value_not_draft(self) -> None:
+        lines: list[str] = []
+        proposed = ProposedAction(
+            run_id="run1",
+            agent_id="rohan_del",
+            account_id="rohan_del",
+            action_type=ActionType.VOTE,
+            content_id="post-1",
+            content_body_preview="I think X will get evicted this week",
+            parent_comment_id=None,
+            parent_comment_preview=None,
+            draft_text="",
+            targeting_strategy="recent",
+            llm_model="",
+            llm_tokens_in=0,
+            llm_tokens_out=0,
+            llm_cost_usd=0.0,
+            vote_value=1,
+            target_kind=ActionTargetKind.CONTENT,
+            target_id="post-1",
+        )
+        response = ApprovalPrompt(
+            output_fn=lines.append,
+            input_fn=lambda _: "y",
+        ).prompt(_ctx(), proposed)
+        rendered = "\n".join(lines)
+        assert "Action: VOTE" in rendered
+        assert "Vote: 1" in rendered
+        assert "Draft:" not in rendered
+        assert response.vote_value == 1
+
+    def test_vote_edit_updates_value(self) -> None:
+        inputs = iter(["e", "-1", "y"])
+
+        def read(_: str) -> str:
+            return next(inputs)
+
+        proposed = ProposedAction(
+            run_id="run1",
+            agent_id="rohan_del",
+            account_id="rohan_del",
+            action_type=ActionType.VOTE,
+            content_id="post-1",
+            content_body_preview="preview",
+            parent_comment_id=None,
+            parent_comment_preview=None,
+            draft_text="",
+            targeting_strategy="recent",
+            llm_model="",
+            llm_tokens_in=0,
+            llm_tokens_out=0,
+            llm_cost_usd=0.0,
+            vote_value=1,
+            target_kind=ActionTargetKind.CONTENT,
+            target_id="post-1",
+        )
+        response = ApprovalPrompt(input_fn=read).prompt(_ctx(), proposed)
+        assert response.decision == ApprovalDecision.PUBLISH
+        assert response.vote_value == -1
+
     def test_invalid_choice_reprompts(self) -> None:
         inputs = iter(["maybe", "y"])
 

@@ -43,15 +43,16 @@ Optional overrides:
 | Method | Default behavior |
 | --- | --- |
 | `capabilities()` | Comments + replies only (`PlatformCapabilities()`); no reactions/votes |
-| `execute(ctx, spec)` | Routes `COMMENT`/`REPLY` to `publish_comment` and `REACT` to `publish_reaction` |
+| `execute(ctx, spec)` | Routes `COMMENT`/`REPLY` to `publish_comment`, `REACT` to `publish_reaction`, and `VOTE` to `publish_vote` |
 | `publish_reaction(ctx, target, reaction_type)` | Raises unless overridden; used when `capabilities().reactions` is set |
-| `current_engagement(ctx, target)` | Returns `{}`. For reactions, return `{"myReaction": "<type>"}` when the account already reacted so the planner can honor `skip_if_already_reacted` |
+| `publish_vote(ctx, target, vote_value)` | Raises unless overridden; used when `capabilities().votes` is set |
+| `current_engagement(ctx, target)` | Returns `{}`. For reactions return `{"myReaction": "<type>"}`; for votes return `{"myVote": 1\|-1\|0}` so the planner can honor skip-if-already settings |
 | `can_reply(ctx, thread, parent, reply_depth_max)` | Checks comment depth against `reply_depth_max` |
 | `filter_candidates(ctx, contents, strategy)` | Delegates to the targeting registry |
 
 Raise `PlatformError` on API failures.
 
-The agent loop publishes via `connector.execute(ctx, ActionSpec)`. Keep implementing `publish_comment` for text actions; override `publish_reaction` (and `capabilities`) when adding reactions.
+The agent loop publishes via `connector.execute(ctx, ActionSpec)`. Keep implementing `publish_comment` for text actions; override `publish_reaction` / `publish_vote` (and `capabilities`) when adding reactions or votes.
 
 ### Reactions contract
 
@@ -62,6 +63,16 @@ To support `run.per_agent.reactions` / `engagement.reactions`:
 3. Optionally override `current_engagement()` so repeated toggles do not clear an existing reaction.
 
 Prefer caching `myReaction` while listing posts / loading threads so the planner does not need one HTTP call per comment candidate.
+
+### Votes contract
+
+To support `run.per_agent.votes` / `engagement.votes`:
+
+1. Override `capabilities()` and return a non-null `VoteCapability` with `target_kinds`, `allowed_values` (e.g. `{1, -1, 0}`), and `mode` (Reddit uses `set`).
+2. Override `publish_vote()` to handle `ActionKind.VOTE` (payload `vote_value`).
+3. Optionally override `current_engagement()` to return `{"myVote": <int>}` for `skip_if_already_voted`.
+
+The built-in Reddit connector implements votes via `POST /api/vote`.
 
 `hypeagent validate` checks that configured reaction types and targets are subsets of what the connector advertises.
 
@@ -181,6 +192,7 @@ See `hypeagent/platforms/reddit.py` for the shipped reference implementation. It
 - `GET /r/{subreddit}/new` for listing
 - `GET /comments/{id}` for threads
 - `POST /api/comment` for publishing
+- `POST /api/vote` for upvotes / downvotes / clears (`dir=1|-1|0`)
 
 Install Reddit support inside your project venv (optional; the connector uses `httpx` directly):
 
