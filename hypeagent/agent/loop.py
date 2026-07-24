@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -21,7 +22,14 @@ from hypeagent.knowledge.static import StaticKnowledgeLoader
 from hypeagent.knowledge.tools import ToolExecutor, ToolRegistry
 from hypeagent.llm.budget import BudgetExceededError, BudgetGuard
 from hypeagent.llm.client import LLMClient
-from hypeagent.models.action import ProposedAction, PublishedAction
+from hypeagent.models.action import (
+    ActionKind,
+    ActionPayload,
+    ActionSpec,
+    ProposedAction,
+    PublishedAction,
+)
+from hypeagent.models.content import Comment, Thread
 from hypeagent.models.run import RunContext, RunMode, RunResult
 from hypeagent.platforms.base import PlatformConnector, PlatformError
 from hypeagent.platforms.registry import load_connector
@@ -226,7 +234,8 @@ class AgentRunner:
             )
             return None, None
 
-        draft_result = drafter.draft(ctx, thread, decision.action_type, decision.parent)
+        parent = _resolve_parent(thread, decision.spec)
+        draft_result = drafter.draft(ctx, thread, decision.spec.kind, parent)
         draft_text = draft_result.final_text
         if not draft_text:
             self._logger.warning(
@@ -237,19 +246,18 @@ class AgentRunner:
             )
             return None, None
 
+        spec = replace(decision.spec, payload=ActionPayload(text=draft_text))
         parent_preview = (
-            RunsRepository.preview_text(decision.parent.body)
-            if decision.parent is not None
-            else None
+            RunsRepository.preview_text(parent.body) if parent is not None else None
         )
         proposed = ProposedAction(
             run_id=run_id,
             agent_id=agent_id,
             account_id=persona.account,
-            action_type=decision.action_type,
+            action_type=spec.kind,
             content_id=content.id,
             content_body_preview=RunsRepository.preview_text(content.body),
-            parent_comment_id=decision.parent.id if decision.parent else None,
+            parent_comment_id=parent.id if parent else None,
             parent_comment_preview=parent_preview,
             draft_text=draft_text,
             targeting_strategy=self._config.targeting.strategy,
@@ -343,13 +351,9 @@ class AgentRunner:
         memory_repo: AgentMemoryRepository,
         runs_repo: RunsRepository,
     ) -> PublishedAction:
-        comment = connector.publish_comment(
-            ctx,
-            proposed.content_id,
-            proposed.draft_text,
-            proposed.parent_comment_id,
-        )
-        runs_repo.mark_published(action_id, comment.id)
+        result = connector.execute(ctx, proposed.to_action_spec())
+        platform_id = result.platform_object_id or ""
+        runs_repo.mark_published(action_id, platform_id)
         memory_repo.record(
             agent_id=proposed.agent_id,
             content_id=proposed.content_id,
@@ -358,7 +362,7 @@ class AgentRunner:
         )
         published = PublishedAction(
             proposed=proposed,
-            platform_comment_id=comment.id,
+            platform_comment_id=platform_id,
             published_at=datetime.now(UTC),
             approved_by=approved_by,  # type: ignore[arg-type]
         )
@@ -368,6 +372,16 @@ class AgentRunner:
             proposed.agent_id,
             proposed.action_type.value,
             proposed.content_id,
-            comment.id,
+            platform_id,
         )
         return published
+
+
+def _resolve_parent(thread: Thread, spec: ActionSpec) -> Comment | None:
+    """Look up reply parent from the thread using ActionSpec.target.id."""
+    if spec.kind != ActionKind.REPLY:
+        return None
+    for comment in thread.comments:
+        if comment.id == spec.target.id:
+            return comment
+    return None

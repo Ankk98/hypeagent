@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from hypeagent.models.action import ActionType, ProposedAction
+from hypeagent.models.action import ActionKind, ProposedAction
 from hypeagent.models.run import RunContext
 
 
@@ -70,7 +70,7 @@ class ApprovalPrompt:
             f"Post preview ({proposed.content_id}):",
             f'  "{proposed.content_body_preview}"',
         ]
-        if proposed.action_type == ActionType.REPLY and proposed.parent_comment_preview:
+        if proposed.action_type == ActionKind.REPLY and proposed.parent_comment_preview:
             lines.extend(
                 [
                     "",

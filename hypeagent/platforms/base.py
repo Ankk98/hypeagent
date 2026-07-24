@@ -3,16 +3,45 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Literal
 
 from hypeagent.config.schema import HttpConfig, PlatformConfig, TargetingConfig
 from hypeagent.config.secrets_schema import AccountSecret
+from hypeagent.models.action import (
+    ActionKind,
+    ActionSpec,
+    ActionTarget,
+    ActionTargetKind,
+    PublishResult,
+)
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext
 
 
 class PlatformError(Exception):
     """Raised when a platform API call fails."""
+
+
+@dataclass(frozen=True)
+class ReactionCapability:
+    """Connector-declared reaction (or vote) support."""
+
+    target_kinds: frozenset[ActionTargetKind]
+    allowed_types: frozenset[str]
+    mode: Literal["toggle", "set", "additive"]
+    max_per_entity: int | None = 1
+
+
+@dataclass(frozen=True)
+class PlatformCapabilities:
+    """What engagement kinds a connector can publish."""
+
+    text_comment: bool = True
+    text_reply: bool = True
+    reactions: ReactionCapability | None = None
+    votes: ReactionCapability | None = None
 
 
 class PlatformConnector(ABC):
@@ -47,6 +76,52 @@ class PlatformConnector(ABC):
         parent_comment_id: str | None,
     ) -> Comment:
         """POST comment/reply as current account. Raises PlatformError on failure."""
+
+    def capabilities(self) -> PlatformCapabilities:
+        """Default: comments + replies only (today's Reddit behavior)."""
+        return PlatformCapabilities()
+
+    def execute(self, ctx: RunContext, spec: ActionSpec) -> PublishResult:
+        """Publish an ActionSpec. Default routes COMMENT/REPLY to publish_comment."""
+        if spec.kind in (ActionKind.COMMENT, ActionKind.REPLY):
+            text = spec.payload.text
+            if not text:
+                msg = f"ActionSpec kind={spec.kind.value} requires payload.text"
+                raise PlatformError(msg)
+            parent_comment_id = (
+                spec.target.id if spec.kind == ActionKind.REPLY else None
+            )
+            if spec.kind == ActionKind.REPLY and not parent_comment_id:
+                msg = "ActionSpec kind=reply requires target.id (parent comment)"
+                raise PlatformError(msg)
+            comment = self.publish_comment(
+                ctx,
+                spec.content_id,
+                text,
+                parent_comment_id,
+            )
+            return PublishResult(
+                platform_object_id=comment.id,
+                raw={"comment_id": comment.id},
+            )
+        caps = self.capabilities()
+        if spec.kind == ActionKind.REACT and caps.reactions is None:
+            msg = f"Connector {self.name!r} does not support reactions"
+            raise PlatformError(msg)
+        if spec.kind == ActionKind.VOTE and caps.votes is None:
+            msg = f"Connector {self.name!r} does not support votes"
+            raise PlatformError(msg)
+        msg = f"Unsupported action kind for execute(): {spec.kind.value}"
+        raise PlatformError(msg)
+
+    def current_engagement(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+    ) -> dict[str, Any]:
+        """Return current user engagement on a target (e.g. myReaction). Default {}."""
+        _ = ctx, target
+        return {}
 
     def can_reply(
         self,

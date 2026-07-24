@@ -6,17 +6,58 @@ import random
 from dataclasses import dataclass
 
 from hypeagent.config.schema import PerAgentConfig
-from hypeagent.models.action import ActionType
+from hypeagent.models.action import (
+    ActionKind,
+    ActionPayload,
+    ActionSpec,
+    ActionTarget,
+    ActionTargetKind,
+)
 from hypeagent.models.content import Comment, Thread
 from hypeagent.models.run import RunContext
 
 
 @dataclass(frozen=True)
 class PlannerDecision:
-    """Chosen action type and optional reply parent."""
+    """Chosen ActionSpec (payload.text filled after drafting)."""
 
-    action_type: ActionType
-    parent: Comment | None
+    spec: ActionSpec
+
+
+def _preview(text: str, max_len: int = 200) -> str:
+    stripped = text.strip()
+    if len(stripped) <= max_len:
+        return stripped
+    if max_len <= 3:
+        return stripped[:max_len]
+    return stripped[: max_len - 3].rstrip() + "..."
+
+
+def _comment_spec(thread: Thread) -> ActionSpec:
+    content = thread.content
+    return ActionSpec(
+        kind=ActionKind.COMMENT,
+        content_id=content.id,
+        target=ActionTarget(
+            kind=ActionTargetKind.CONTENT,
+            id=content.id,
+            preview=_preview(content.body),
+        ),
+        payload=ActionPayload(),
+    )
+
+
+def _reply_spec(thread: Thread, parent: Comment) -> ActionSpec:
+    return ActionSpec(
+        kind=ActionKind.REPLY,
+        content_id=thread.content.id,
+        target=ActionTarget(
+            kind=ActionTargetKind.COMMENT,
+            id=parent.id,
+            preview=_preview(parent.body),
+        ),
+        payload=ActionPayload(),
+    )
 
 
 class Planner:
@@ -46,12 +87,12 @@ class Planner:
                 if connector.can_reply(ctx, thread, comment, reply_depth_max)
             ]
             if eligible:
-                return PlannerDecision(ActionType.REPLY, random.choice(eligible))
+                return PlannerDecision(_reply_spec(thread, random.choice(eligible)))
             if per_agent.comments > 0:
-                return PlannerDecision(ActionType.COMMENT, None)
+                return PlannerDecision(_comment_spec(thread))
             return None
 
         if per_agent.comments > 0:
-            return PlannerDecision(ActionType.COMMENT, None)
+            return PlannerDecision(_comment_spec(thread))
 
         return None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from hypeagent.models.action import ActionType, ProposedAction, ToolCallRecord
+from hypeagent.models.action import ActionKind, ActionType, ProposedAction, ToolCallRecord
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunMode
 
@@ -75,7 +75,8 @@ def test_proposed_action_fields() -> None:
             ),
         ],
     )
-    assert action.action_type == ActionType.REPLY
+    assert action.action_type == ActionKind.REPLY
+    assert ActionType is ActionKind
 
 
 def test_run_mode_values() -> None:

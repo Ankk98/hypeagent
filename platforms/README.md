@@ -42,10 +42,15 @@ Optional overrides:
 
 | Method | Default behavior |
 | --- | --- |
+| `capabilities()` | Comments + replies only (`PlatformCapabilities()`); no reactions/votes |
+| `execute(ctx, spec)` | Routes `COMMENT`/`REPLY` `ActionSpec` to `publish_comment`; raises for other kinds |
+| `current_engagement(ctx, target)` | Returns `{}` (used later for skip-if-already-reacted) |
 | `can_reply(ctx, thread, parent, reply_depth_max)` | Checks comment depth against `reply_depth_max` |
 | `filter_candidates(ctx, contents, strategy)` | Delegates to the targeting registry |
 
 Raise `PlatformError` on API failures.
+
+The agent loop publishes via `connector.execute(ctx, ActionSpec)`. Keep implementing `publish_comment` for text actions; override `execute` (and `capabilities`) when adding reactions or votes.
 
 ### Canonical models
 

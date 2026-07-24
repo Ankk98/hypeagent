@@ -1,6 +1,6 @@
 # Plan: Flexible engagement actions (reactions and beyond)
 
-**Status:** Draft plan (not yet implemented)  
+**Status:** Phase A implemented (core `ActionSpec` / `execute`); Phases B–E not started  
 **Scope:** Extend hypeagent beyond comment/reply so connectors can publish platform-native engagement (reactions, votes, likes, etc.) without hard-coding one app’s API into the core.  
 **Primary motivator:** Social platforms commonly support non-text engagement such as typed reactions, likes, and votes on posts and comments.  
 **Related:** Current v1 locks actions to `comment` / `reply` only ([implementation plan §1](./implementation_plan.md)).
@@ -460,7 +460,7 @@ def capabilities(self) -> PlatformCapabilities:
 
 ## 12. Implementation phases
 
-### Phase A — Core action DSL (no new product behavior yet)
+### Phase A — Core action DSL (no new product behavior yet) ✅
 
 - Introduce `ActionKind`, `ActionSpec`, `PublishResult`, `PlatformCapabilities`.
 - Add `execute()` defaulting to `publish_comment` for COMMENT/REPLY.

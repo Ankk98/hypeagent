@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from hypeagent.agent.planner import Planner
 from hypeagent.config.schema import HypeagentConfig, PerAgentConfig
 from hypeagent.config.secrets_schema import AccountSecret, Secrets
-from hypeagent.models.action import ActionType
+from hypeagent.models.action import ActionKind, ActionTargetKind
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext, RunMode
 from hypeagent.platforms.base import PlatformConnector
@@ -111,17 +111,19 @@ class TestPlanner:
         thread = _thread(comments=[_comment("c1"), _comment("c2")])
         decision = Planner().decide(PerAgentConfig(replies=1), thread, ctx)
         assert decision is not None
-        assert decision.action_type == ActionType.REPLY
-        assert decision.parent is not None
-        assert decision.parent.id in {"c1", "c2"}
+        assert decision.spec.kind == ActionKind.REPLY
+        assert decision.spec.target.kind == ActionTargetKind.COMMENT
+        assert decision.spec.target.id in {"c1", "c2"}
+        assert decision.spec.payload.text is None
 
     def test_comment_when_only_comment_quota(self) -> None:
         ctx = _run_context()
         thread = _thread(comments=[_comment("c1")])
         decision = Planner().decide(PerAgentConfig(comments=1, replies=0), thread, ctx)
         assert decision is not None
-        assert decision.action_type == ActionType.COMMENT
-        assert decision.parent is None
+        assert decision.spec.kind == ActionKind.COMMENT
+        assert decision.spec.target.kind == ActionTargetKind.CONTENT
+        assert decision.spec.target.id == "post1"
 
     def test_skips_when_no_quota(self) -> None:
         ctx = _run_context()
@@ -138,8 +140,8 @@ class TestPlanner:
             ctx,
         )
         assert decision is not None
-        assert decision.action_type == ActionType.COMMENT
-        assert decision.parent is None
+        assert decision.spec.kind == ActionKind.COMMENT
+        assert decision.spec.target.kind == ActionTargetKind.CONTENT
 
     def test_reply_skips_when_no_eligible_and_no_comment_quota(self) -> None:
         ctx = _run_context(reply_depth_max=0)
