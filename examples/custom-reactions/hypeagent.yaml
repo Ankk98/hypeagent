@@ -1,0 +1,62 @@
+version: 1
+
+name: custom-typed-reactions
+
+platform:
+  connector: ./platforms/community_app.py
+  base_url: http://localhost:4000/api
+  user_agent: hypeagent/0.1 (community-app-example)
+
+http:
+  timeout_seconds: 30
+  retry_count: 2
+
+llm:
+  provider: openrouter
+  base_url: https://openrouter.ai/api/v1
+  model: openai/gpt-4o-mini
+  temperature: 0.9
+  max_tokens: 256
+
+budgets:
+  llm_daily_usd: 2.00
+  llm_total_usd: 50.00
+  max_actions_per_run: 20
+
+run:
+  agents:
+    - reaction_fan
+  per_agent:
+    comments: 0
+    replies: 0
+    reactions: 1
+  action_priority: [reaction, comment, reply]
+
+engagement:
+  reactions:
+    enabled: true
+    targets: [content, comment]
+    types: [agree, insightful, like, funny]
+    strategy: weighted
+    weights:
+      agree: 0.35
+      insightful: 0.30
+      like: 0.25
+      funny: 0.10
+    skip_if_already_reacted: true
+
+targeting:
+  strategy: recent
+  params:
+    since_hours: 24
+
+personas:
+  reaction_fan:
+    account: reaction_fan
+    brief: >
+      An engaged community member who reacts to posts and comments.
+
+logging:
+  level: info
+  file: ./logs/hypeagent.log
+  console: true

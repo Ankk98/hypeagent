@@ -17,10 +17,16 @@ from hypeagent.models.action import (
     ActionTargetKind,
     ActionType,
     ProposedAction,
+    PublishResult,
 )
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext, RunMode
-from hypeagent.platforms.base import PlatformCapabilities, PlatformConnector, PlatformError
+from hypeagent.platforms.base import (
+    PlatformCapabilities,
+    PlatformConnector,
+    PlatformError,
+    ReactionCapability,
+)
 
 
 class _StubConnector(PlatformConnector):
@@ -306,6 +312,103 @@ class TestConnectorExecute:
         )
         with pytest.raises(PlatformError, match="does not support reactions"):
             connector.execute(ctx, spec)
+
+    def test_execute_react_routes_to_publish_reaction(self) -> None:
+        class _ReactingConnector(_StubConnector):
+            def capabilities(self) -> PlatformCapabilities:
+                return PlatformCapabilities(
+                    reactions=ReactionCapability(
+                        target_kinds=frozenset({ActionTargetKind.CONTENT}),
+                        allowed_types=frozenset({"like"}),
+                        mode="set",
+                    )
+                )
+
+            def publish_reaction(
+                self,
+                ctx: RunContext,
+                target: ActionTarget,
+                reaction_type: str,
+            ) -> PublishResult:
+                _ = ctx
+                self.publish_calls.append((target.id, reaction_type, None))
+                return PublishResult(platform_object_id=f"rxn-{reaction_type}")
+
+        config = HypeagentConfig.model_validate(
+            {
+                "version": 1,
+                "name": "exec",
+                "platform": {
+                    "connector": "reddit",
+                    "base_url": "https://oauth.reddit.com",
+                    "user_agent": "hypeagent/1.0",
+                },
+                "llm": {
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "model": "openai/gpt-4o-mini",
+                },
+                "budgets": {"llm_daily_usd": 2.0, "llm_total_usd": 50.0},
+                "run": {"agents": ["alice"], "per_agent": {"reactions": 1}},
+                "targeting": {"strategy": "recent"},
+                "personas": {"alice": {"account": "alice", "brief": "Test."}},
+            }
+        )
+        account = AccountSecret(user_id="u1", token="tok")
+        connector = _ReactingConnector(config.platform, account, config.http)
+        result = connector.execute(
+            _ctx(connector),
+            ActionSpec(
+                kind=ActionKind.REACT,
+                content_id="post1",
+                target=ActionTarget(kind=ActionTargetKind.CONTENT, id="post1"),
+                payload=ActionPayload(reaction_type="like"),
+            ),
+        )
+        assert result.platform_object_id == "rxn-like"
+        assert connector.publish_calls == [("post1", "like", None)]
+
+    def test_execute_react_requires_publish_reaction_override(self) -> None:
+        class _CapsOnlyConnector(_StubConnector):
+            def capabilities(self) -> PlatformCapabilities:
+                return PlatformCapabilities(
+                    reactions=ReactionCapability(
+                        target_kinds=frozenset({ActionTargetKind.CONTENT}),
+                        allowed_types=frozenset({"like"}),
+                        mode="toggle",
+                    )
+                )
+
+        config = HypeagentConfig.model_validate(
+            {
+                "version": 1,
+                "name": "exec",
+                "platform": {
+                    "connector": "reddit",
+                    "base_url": "https://oauth.reddit.com",
+                    "user_agent": "hypeagent/1.0",
+                },
+                "llm": {
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "model": "openai/gpt-4o-mini",
+                },
+                "budgets": {"llm_daily_usd": 2.0, "llm_total_usd": 50.0},
+                "run": {"agents": ["alice"], "per_agent": {"reactions": 1}},
+                "targeting": {"strategy": "recent"},
+                "personas": {"alice": {"account": "alice", "brief": "Test."}},
+            }
+        )
+        account = AccountSecret(user_id="u1", token="tok")
+        connector = _CapsOnlyConnector(config.platform, account, config.http)
+        with pytest.raises(PlatformError, match="does not implement publish_reaction"):
+            connector.execute(
+                _ctx(connector),
+                ActionSpec(
+                    kind=ActionKind.REACT,
+                    content_id="post1",
+                    target=ActionTarget(kind=ActionTargetKind.CONTENT, id="post1"),
+                    payload=ActionPayload(reaction_type="like"),
+                ),
+            )
 
     def test_execute_comment_requires_text(self) -> None:
         config = HypeagentConfig.model_validate(

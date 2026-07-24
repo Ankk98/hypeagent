@@ -72,7 +72,10 @@ class TestMigrations:
         conn = sqlite3.connect(path)
         # Simulate a v1 schema without payload columns.
         legacy_v1 = SCHEMA_V1.replace(
-            "  created_at TEXT NOT NULL,\n  payload_json TEXT,\n  target_kind TEXT,\n  target_id TEXT,\n",
+            "  created_at TEXT NOT NULL,\n"
+            "  payload_json TEXT,\n"
+            "  target_kind TEXT,\n"
+            "  target_id TEXT,\n",
             "  created_at TEXT NOT NULL,\n",
         )
         conn.executescript(legacy_v1)

@@ -234,6 +234,4 @@ class Planner:
             return True
         engagement = ctx.connector.current_engagement(ctx, target)
         my_reaction = engagement.get("myReaction")
-        if my_reaction:
-            return False
-        return True
+        return not my_reaction

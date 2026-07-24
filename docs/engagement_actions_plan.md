@@ -1,6 +1,6 @@
 # Plan: Flexible engagement actions (reactions and beyond)
 
-**Status:** Phase A + B implemented (core DSL + reactions config/planner/approval); Phases C–E not started  
+**Status:** Phases A–C implemented (Phase C includes the tested custom typed-reaction connector example; live API approval remains an operator check); Phases D–E not started
 **Scope:** Extend hypeagent beyond comment/reply so connectors can publish platform-native engagement (reactions, votes, likes, etc.) without hard-coding one app’s API into the core.  
 **Primary motivator:** Social platforms commonly support non-text engagement such as typed reactions, likes, and votes on posts and comments.  
 **Related:** Current v1 locks actions to `comment` / `reply` only ([implementation plan §1](./implementation_plan.md)).
@@ -476,9 +476,10 @@ def capabilities(self) -> PlatformCapabilities:
 
 ### Phase C — Typed-reaction connector support
 
-- Implement `capabilities`, `execute` for REACT, `current_engagement`.
-- Add a documented example YAML that enables reactions.
-- Manual approve run: mix of comments + reactions visible on feed/post UI.
+- ✅ Implement `capabilities`, `execute` for REACT, `current_engagement`.
+- ✅ Add a documented example YAML that enables reactions.
+- Operator check: run approve mode against the adapted live API and verify reactions
+  in its feed/post UI.
 
 ### Phase D — Votes + Reddit
 

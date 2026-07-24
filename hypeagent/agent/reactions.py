@@ -6,7 +6,7 @@ import json
 import logging
 import random
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 from hypeagent.config.schema import PersonaConfig, ReactionsEngagementConfig
 from hypeagent.llm.client import LLMClient

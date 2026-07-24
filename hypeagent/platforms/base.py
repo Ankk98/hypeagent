@@ -81,8 +81,22 @@ class PlatformConnector(ABC):
         """Default: comments + replies only (today's Reddit behavior)."""
         return PlatformCapabilities()
 
+    def publish_reaction(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+        reaction_type: str,
+    ) -> PublishResult:
+        """Publish a reaction. Override when capabilities().reactions is non-null."""
+        _ = ctx, target, reaction_type
+        msg = (
+            f"Connector {self.name!r} advertises reactions but does not implement "
+            "publish_reaction()"
+        )
+        raise PlatformError(msg)
+
     def execute(self, ctx: RunContext, spec: ActionSpec) -> PublishResult:
-        """Publish an ActionSpec. Default routes COMMENT/REPLY to publish_comment."""
+        """Publish an ActionSpec. Default routes COMMENT/REPLY/REACT to helpers."""
         if spec.kind in (ActionKind.COMMENT, ActionKind.REPLY):
             text = spec.payload.text
             if not text:
@@ -105,9 +119,27 @@ class PlatformConnector(ABC):
                 raw={"comment_id": comment.id},
             )
         caps = self.capabilities()
-        if spec.kind == ActionKind.REACT and caps.reactions is None:
-            msg = f"Connector {self.name!r} does not support reactions"
-            raise PlatformError(msg)
+        if spec.kind == ActionKind.REACT:
+            if caps.reactions is None:
+                msg = f"Connector {self.name!r} does not support reactions"
+                raise PlatformError(msg)
+            reaction_type = spec.payload.reaction_type
+            if not reaction_type:
+                msg = "ActionSpec kind=react requires payload.reaction_type"
+                raise PlatformError(msg)
+            if reaction_type not in caps.reactions.allowed_types:
+                msg = (
+                    f"Reaction type {reaction_type!r} is not in connector "
+                    f"{self.name!r} allowlist"
+                )
+                raise PlatformError(msg)
+            if spec.target.kind not in caps.reactions.target_kinds:
+                msg = (
+                    f"Connector {self.name!r} cannot react to target kind "
+                    f"{spec.target.kind.value!r}"
+                )
+                raise PlatformError(msg)
+            return self.publish_reaction(ctx, spec.target, reaction_type)
         if spec.kind == ActionKind.VOTE and caps.votes is None:
             msg = f"Connector {self.name!r} does not support votes"
             raise PlatformError(msg)

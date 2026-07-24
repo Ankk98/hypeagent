@@ -43,24 +43,31 @@ Optional overrides:
 | Method | Default behavior |
 | --- | --- |
 | `capabilities()` | Comments + replies only (`PlatformCapabilities()`); no reactions/votes |
-| `execute(ctx, spec)` | Routes `COMMENT`/`REPLY` `ActionSpec` to `publish_comment`; raises for other kinds |
+| `execute(ctx, spec)` | Routes `COMMENT`/`REPLY` to `publish_comment` and `REACT` to `publish_reaction` |
+| `publish_reaction(ctx, target, reaction_type)` | Raises unless overridden; used when `capabilities().reactions` is set |
 | `current_engagement(ctx, target)` | Returns `{}`. For reactions, return `{"myReaction": "<type>"}` when the account already reacted so the planner can honor `skip_if_already_reacted` |
 | `can_reply(ctx, thread, parent, reply_depth_max)` | Checks comment depth against `reply_depth_max` |
 | `filter_candidates(ctx, contents, strategy)` | Delegates to the targeting registry |
 
 Raise `PlatformError` on API failures.
 
-The agent loop publishes via `connector.execute(ctx, ActionSpec)`. Keep implementing `publish_comment` for text actions; override `execute` (and `capabilities`) when adding reactions or votes.
+The agent loop publishes via `connector.execute(ctx, ActionSpec)`. Keep implementing `publish_comment` for text actions; override `publish_reaction` (and `capabilities`) when adding reactions.
 
 ### Reactions contract
 
 To support `run.per_agent.reactions` / `engagement.reactions`:
 
 1. Override `capabilities()` and return a non-null `ReactionCapability` with `target_kinds`, `allowed_types`, and `mode` (`toggle` / `set` / `additive`).
-2. Override `execute()` to handle `ActionKind.REACT` (payload `reaction_type`, target `CONTENT` or `COMMENT`).
+2. Override `publish_reaction()` (or `execute()`) to handle `ActionKind.REACT` (payload `reaction_type`, target `CONTENT` or `COMMENT`).
 3. Optionally override `current_engagement()` so repeated toggles do not clear an existing reaction.
 
+Prefer caching `myReaction` while listing posts / loading threads so the planner does not need one HTTP call per comment candidate.
+
 `hypeagent validate` checks that configured reaction types and targets are subsets of what the connector advertises.
+
+See the runnable [custom typed-reactions example](../examples/custom-reactions/)
+for a complete file-based connector, YAML config, bearer-token HTTP mapping, and
+the expected post/comment response shapes.
 
 See [engagement actions plan](../docs/engagement_actions_plan.md) for the full capability model.
 

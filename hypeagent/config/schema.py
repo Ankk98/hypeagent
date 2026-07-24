@@ -72,9 +72,13 @@ ReactionTargetName = Literal["content", "comment"]
 ReactionStrategyName = Literal["weighted", "random", "llm_choose", "persona_affinity"]
 
 
+def _default_reaction_targets() -> list[ReactionTargetName]:
+    return ["content"]
+
+
 class ReactionsEngagementConfig(StrictModel):
     enabled: bool = False
-    targets: list[ReactionTargetName] = Field(default_factory=lambda: ["content"])
+    targets: list[ReactionTargetName] = Field(default_factory=_default_reaction_targets)
     types: list[str] | None = None
     strategy: ReactionStrategyName = "weighted"
     weights: dict[str, float] = Field(default_factory=dict)

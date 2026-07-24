@@ -55,10 +55,10 @@ def validate_engagement_against_capabilities(
 
     if reaction_cfg.weights:
         weight_keys = set(reaction_cfg.weights)
-        allowed = set(reaction_caps.allowed_types)
+        allowed_weight_types = set(reaction_caps.allowed_types)
         if reaction_cfg.types is not None:
-            allowed = allowed & set(reaction_cfg.types)
-        unknown_weights = sorted(weight_keys - allowed)
+            allowed_weight_types &= set(reaction_cfg.types)
+        unknown_weights = sorted(weight_keys - allowed_weight_types)
         if unknown_weights:
             errors.append(
                 "engagement.reactions.weights keys not in allowed types: "
