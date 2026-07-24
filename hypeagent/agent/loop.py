@@ -26,10 +26,11 @@ from hypeagent.models.action import (
     ActionKind,
     ActionPayload,
     ActionSpec,
+    ActionTargetKind,
     ProposedAction,
     PublishedAction,
 )
-from hypeagent.models.content import Comment, Thread
+from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext, RunMode, RunResult
 from hypeagent.platforms.base import PlatformConnector, PlatformError
 from hypeagent.platforms.registry import load_connector
@@ -234,39 +235,52 @@ class AgentRunner:
             )
             return None, None
 
-        parent = _resolve_parent(thread, decision.spec)
-        draft_result = drafter.draft(ctx, thread, decision.spec.kind, parent)
-        draft_text = draft_result.final_text
-        if not draft_text:
-            self._logger.warning(
-                "run_id=%s agent=%s event=empty_draft content_id=%s",
-                run_id,
-                agent_id,
-                content.id,
+        spec = decision.spec
+        if spec.kind == ActionKind.REACT:
+            proposed = self._build_react_proposed(
+                run_id=run_id,
+                agent_id=agent_id,
+                persona_account=persona.account,
+                content=content,
+                spec=spec,
             )
-            return None, None
+        else:
+            parent = _resolve_parent(thread, spec)
+            draft_result = drafter.draft(ctx, thread, spec.kind, parent)
+            draft_text = draft_result.final_text
+            if not draft_text:
+                self._logger.warning(
+                    "run_id=%s agent=%s event=empty_draft content_id=%s",
+                    run_id,
+                    agent_id,
+                    content.id,
+                )
+                return None, None
 
-        spec = replace(decision.spec, payload=ActionPayload(text=draft_text))
-        parent_preview = (
-            RunsRepository.preview_text(parent.body) if parent is not None else None
-        )
-        proposed = ProposedAction(
-            run_id=run_id,
-            agent_id=agent_id,
-            account_id=persona.account,
-            action_type=spec.kind,
-            content_id=content.id,
-            content_body_preview=RunsRepository.preview_text(content.body),
-            parent_comment_id=parent.id if parent else None,
-            parent_comment_preview=parent_preview,
-            draft_text=draft_text,
-            targeting_strategy=self._config.targeting.strategy,
-            llm_model=draft_result.model,
-            llm_tokens_in=draft_result.tokens_in,
-            llm_tokens_out=draft_result.tokens_out,
-            llm_cost_usd=draft_result.cost_usd,
-            tool_calls=list(draft_result.tool_calls),
-        )
+            filled = replace(spec, payload=ActionPayload(text=draft_text))
+            parent_preview = (
+                RunsRepository.preview_text(parent.body) if parent is not None else None
+            )
+            proposed = ProposedAction(
+                run_id=run_id,
+                agent_id=agent_id,
+                account_id=persona.account,
+                action_type=filled.kind,
+                content_id=content.id,
+                content_body_preview=RunsRepository.preview_text(content.body),
+                parent_comment_id=parent.id if parent else None,
+                parent_comment_preview=parent_preview,
+                draft_text=draft_text,
+                targeting_strategy=self._config.targeting.strategy,
+                llm_model=draft_result.model,
+                llm_tokens_in=draft_result.tokens_in,
+                llm_tokens_out=draft_result.tokens_out,
+                llm_cost_usd=draft_result.cost_usd,
+                tool_calls=list(draft_result.tool_calls),
+                target_kind=filled.target.kind,
+                target_id=filled.target.id,
+                payload_json=filled.payload.to_json(),
+            )
         action_id = runs_repo.save_proposed(proposed)
 
         published = self._handle_publish_mode(
@@ -282,6 +296,43 @@ class AgentRunner:
         budget_guard.check()
         return proposed, published
 
+    def _build_react_proposed(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        persona_account: str,
+        content: Content,
+        spec: ActionSpec,
+    ) -> ProposedAction:
+        reaction_type = spec.payload.reaction_type or ""
+        parent_comment_id = (
+            spec.target.id if spec.target.kind == ActionTargetKind.COMMENT else None
+        )
+        parent_preview = (
+            spec.target.preview if spec.target.kind == ActionTargetKind.COMMENT else None
+        )
+        return ProposedAction(
+            run_id=run_id,
+            agent_id=agent_id,
+            account_id=persona_account,
+            action_type=ActionKind.REACT,
+            content_id=content.id,
+            content_body_preview=RunsRepository.preview_text(content.body),
+            parent_comment_id=parent_comment_id,
+            parent_comment_preview=parent_preview,
+            draft_text="",
+            targeting_strategy=self._config.targeting.strategy,
+            llm_model="",
+            llm_tokens_in=0,
+            llm_tokens_out=0,
+            llm_cost_usd=0.0,
+            reaction_type=reaction_type,
+            target_kind=spec.target.kind,
+            target_id=spec.target.id,
+            payload_json=spec.payload.to_json(),
+        )
+
     def _handle_publish_mode(
         self,
         *,
@@ -295,14 +346,27 @@ class AgentRunner:
         runs_repo: RunsRepository,
     ) -> PublishedAction | None:
         if mode == RunMode.DRY_RUN:
-            self._logger.info(
-                "run_id=%s agent=%s event=dry_run action=%s content_id=%s draft=%r",
-                proposed.run_id,
-                proposed.agent_id,
-                proposed.action_type.value,
-                proposed.content_id,
-                proposed.draft_text,
-            )
+            if proposed.action_type == ActionKind.REACT:
+                self._logger.info(
+                    "run_id=%s agent=%s event=dry_run action=%s content_id=%s "
+                    "reaction=%s target_kind=%s target_id=%s",
+                    proposed.run_id,
+                    proposed.agent_id,
+                    proposed.action_type.value,
+                    proposed.content_id,
+                    proposed.reaction_type,
+                    proposed.target_kind.value if proposed.target_kind else None,
+                    proposed.target_id,
+                )
+            else:
+                self._logger.info(
+                    "run_id=%s agent=%s event=dry_run action=%s content_id=%s draft=%r",
+                    proposed.run_id,
+                    proposed.agent_id,
+                    proposed.action_type.value,
+                    proposed.content_id,
+                    proposed.draft_text,
+                )
             return None
 
         if mode == RunMode.APPROVE:
@@ -317,8 +381,16 @@ class AgentRunner:
                     proposed.content_id,
                 )
                 return None
-            if response.draft_text != proposed.draft_text:
+            if proposed.action_type == ActionKind.REACT:
+                if response.reaction_type and response.reaction_type != proposed.reaction_type:
+                    proposed.reaction_type = response.reaction_type
+                    proposed.payload_json = ActionPayload(
+                        reaction_type=response.reaction_type
+                    ).to_json()
+                    runs_repo.update_reaction(action_id, proposed.payload_json)
+            elif response.draft_text != proposed.draft_text:
                 proposed.draft_text = response.draft_text
+                proposed.payload_json = ActionPayload(text=response.draft_text).to_json()
                 runs_repo.update_draft_text(action_id, response.draft_text)
             return self._publish(
                 ctx=ctx,
@@ -358,7 +430,7 @@ class AgentRunner:
             agent_id=proposed.agent_id,
             content_id=proposed.content_id,
             action_type=proposed.action_type.value,
-            text_preview=proposed.draft_text,
+            text_preview=proposed.display_preview(),
         )
         published = PublishedAction(
             proposed=proposed,

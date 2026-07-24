@@ -152,6 +152,32 @@ class TestProposedActionToSpec:
         assert spec.target.id == "c1"
         assert spec.payload.text == "reply body"
 
+    def test_react_spec(self) -> None:
+        proposed = ProposedAction(
+            run_id="r1",
+            agent_id="alice",
+            account_id="alice",
+            action_type=ActionKind.REACT,
+            content_id="post1",
+            content_body_preview="hello",
+            parent_comment_id=None,
+            parent_comment_preview=None,
+            draft_text="",
+            targeting_strategy="recent",
+            llm_model="",
+            llm_tokens_in=0,
+            llm_tokens_out=0,
+            llm_cost_usd=0.0,
+            reaction_type="agree",
+            target_kind=ActionTargetKind.CONTENT,
+            target_id="post1",
+            payload_json=ActionPayload(reaction_type="agree").to_json(),
+        )
+        spec = proposed.to_action_spec()
+        assert spec.kind == ActionKind.REACT
+        assert spec.target.kind == ActionTargetKind.CONTENT
+        assert spec.payload.reaction_type == "agree"
+
 
 class TestConnectorExecute:
     def test_default_capabilities(self) -> None:

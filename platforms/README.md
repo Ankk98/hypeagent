@@ -44,13 +44,25 @@ Optional overrides:
 | --- | --- |
 | `capabilities()` | Comments + replies only (`PlatformCapabilities()`); no reactions/votes |
 | `execute(ctx, spec)` | Routes `COMMENT`/`REPLY` `ActionSpec` to `publish_comment`; raises for other kinds |
-| `current_engagement(ctx, target)` | Returns `{}` (used later for skip-if-already-reacted) |
+| `current_engagement(ctx, target)` | Returns `{}`. For reactions, return `{"myReaction": "<type>"}` when the account already reacted so the planner can honor `skip_if_already_reacted` |
 | `can_reply(ctx, thread, parent, reply_depth_max)` | Checks comment depth against `reply_depth_max` |
 | `filter_candidates(ctx, contents, strategy)` | Delegates to the targeting registry |
 
 Raise `PlatformError` on API failures.
 
 The agent loop publishes via `connector.execute(ctx, ActionSpec)`. Keep implementing `publish_comment` for text actions; override `execute` (and `capabilities`) when adding reactions or votes.
+
+### Reactions contract
+
+To support `run.per_agent.reactions` / `engagement.reactions`:
+
+1. Override `capabilities()` and return a non-null `ReactionCapability` with `target_kinds`, `allowed_types`, and `mode` (`toggle` / `set` / `additive`).
+2. Override `execute()` to handle `ActionKind.REACT` (payload `reaction_type`, target `CONTENT` or `COMMENT`).
+3. Optionally override `current_engagement()` so repeated toggles do not clear an existing reaction.
+
+`hypeagent validate` checks that configured reaction types and targets are subsets of what the connector advertises.
+
+See [engagement actions plan](../docs/engagement_actions_plan.md) for the full capability model.
 
 ### Canonical models
 

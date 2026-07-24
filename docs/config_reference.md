@@ -81,10 +81,53 @@ Unknown keys are rejected. All `extra_info` fields are injected into LLM prompts
 | Key | Required | Description |
 | --- | --- | --- |
 | `agents` | yes | Ordered list of persona IDs to run sequentially |
-| `per_agent.comments` | yes | Top-level comments per agent per run |
-| `per_agent.replies` | yes | Thread replies per agent per run |
+| `per_agent.comments` | no (default `0`) | Top-level comments per agent per run |
+| `per_agent.replies` | no (default `1`) | Thread replies per agent per run |
+| `per_agent.reactions` | no (default `0`) | Reaction publishes per agent per run |
+| `action_priority` | no | Kind order when multiple quotas remain: `reply`, `comment`, `reaction`, `vote` (default: that order) |
 | `reply_depth_max` | `2` | Max comment nesting depth for replies |
 | `extra_info` | no | Run-level rules for prompts |
+
+### `engagement`
+
+Optional. Controls non-text engagement. Reddit configs can omit this section.
+
+#### `engagement.reactions`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Prefer explicit enable; also implied when `per_agent.reactions > 0` for validation |
+| `targets` | `[content]` | Where to react: `content`, `comment`, or both |
+| `types` | all connector-allowed | Subset of connector reaction vocabulary |
+| `strategy` | `weighted` | `weighted`, `random`, `llm_choose`, or `persona_affinity` |
+| `weights` | equal | Relative weights when `strategy=weighted` (keys must be allowed types) |
+| `skip_if_already_reacted` | `true` | Skip targets where `current_engagement` reports `myReaction` |
+| `avoid_content_author_ids` | `[]` | Do not react to content/comments by these author IDs |
+
+`hypeagent validate` fails if reactions are requested (`per_agent.reactions > 0` or `enabled: true`) but the connector does not advertise `capabilities().reactions`, or if `types` / `targets` are outside the connector allowlist.
+
+Example:
+
+```yaml
+run:
+  per_agent:
+    comments: 0
+    replies: 0
+    reactions: 1
+  action_priority: [reaction, comment, reply]
+
+engagement:
+  reactions:
+    enabled: true
+    targets: [content]
+    types: [agree, insightful, like]
+    strategy: weighted
+    weights:
+      agree: 0.4
+      insightful: 0.3
+      like: 0.3
+    skip_if_already_reacted: true
+```
 
 ### `targeting`
 

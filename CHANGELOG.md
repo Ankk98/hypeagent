@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reactions (Phase B)** — Config `per_agent.reactions` + `engagement.reactions`, planner strategies (`weighted` / `random` / `llm_choose` / `persona_affinity`), kind-aware approval UI, SQLite `payload_json` / target columns, and validate-time capability checks. Connectors still must implement REACT in Phase C.
+
 ### Changed
 
 - **Action DSL (Phase A)** — Introduced `ActionKind` / `ActionSpec` / `PublishResult` and connector `capabilities()` + `execute()`; comment/reply publish path now goes through `execute` with identical CLI behavior.

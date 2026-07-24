@@ -24,7 +24,7 @@
 | LLM | OpenRouter default; any OpenAI-compatible API via config |
 | Storage | SQLite at `~/.hypeagent/hypeagent.db` (override with `--db`) |
 | Agent model | Sequential, independent agents; each sees fresh platform state |
-| v1 actions | `comment`, `reply` on `post` content only |
+| v1 actions | `comment`, `reply` on `post` content only; v1.1 adds capability-based `react` (see [engagement actions plan](./engagement_actions_plan.md)) |
 | v1 default mode | `dry-run` |
 | Publish modes | `dry-run` \| `approve` \| `auto` |
 | Scheduling | `hypeagent cron-print` outputs crontab line; no in-process scheduler |

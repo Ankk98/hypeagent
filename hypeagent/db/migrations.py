@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS proposed_actions (
   published INTEGER NOT NULL DEFAULT 0,
   platform_comment_id TEXT,
   created_at TEXT NOT NULL,
+  payload_json TEXT,
+  target_kind TEXT,
+  target_id TEXT,
   FOREIGN KEY (run_id) REFERENCES runs(run_id)
 );
 
@@ -81,13 +84,38 @@ def current_version(conn: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
+def _set_version(conn: sqlite3.Connection, version: int) -> None:
+    conn.execute("DELETE FROM schema_version")
+    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.commit()
+
+
+def _column_names(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    """Add ActionSpec payload / target columns to proposed_actions."""
+    existing = _column_names(conn, "proposed_actions")
+    for column, decl in (
+        ("payload_json", "TEXT"),
+        ("target_kind", "TEXT"),
+        ("target_id", "TEXT"),
+    ):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE proposed_actions ADD COLUMN {column} {decl}")
+    conn.commit()
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     """Apply pending migrations."""
     version = current_version(conn)
-    if version >= SCHEMA_VERSION:
-        return
-
-    conn.executescript(SCHEMA_V1)
-    conn.execute("DELETE FROM schema_version")
-    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
-    conn.commit()
+    if version < 1:
+        conn.executescript(SCHEMA_V1)
+        _set_version(conn, 1)
+        version = 1
+    if version < 2:
+        # Fresh installs already have v2 columns in SCHEMA_V1; ALTER is a no-op then.
+        _migrate_v2(conn)
+        _set_version(conn, 2)

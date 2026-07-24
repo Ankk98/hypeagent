@@ -67,6 +67,46 @@ class TestRunsRepository:
             assert row["actions_proposed"] == 1
             assert row["actions_published"] == 1
 
+    def test_saves_reaction_payload_fields(self, tmp_path) -> None:
+        from hypeagent.models.action import ActionKind, ActionPayload, ActionTargetKind
+
+        db_path = tmp_path / "react.db"
+        with Database(db_path) as db:
+            repo = RunsRepository(db)
+            repo.start_run(
+                run_id="run1",
+                config_name="test",
+                mode="dry_run",
+                agents_total=1,
+            )
+            proposed = ProposedAction(
+                run_id="run1",
+                agent_id="alice",
+                account_id="alice",
+                action_type=ActionKind.REACT,
+                content_id="post1",
+                content_body_preview="Post",
+                parent_comment_id=None,
+                parent_comment_preview=None,
+                draft_text="",
+                targeting_strategy="recent",
+                llm_model="",
+                llm_tokens_in=0,
+                llm_tokens_out=0,
+                llm_cost_usd=0.0,
+                reaction_type="agree",
+                target_kind=ActionTargetKind.CONTENT,
+                target_id="post1",
+                payload_json=ActionPayload(reaction_type="agree").to_json(),
+            )
+            repo.save_proposed(proposed)
+            stored = repo.get_proposed_for_run("run1")
+            assert stored[0].action_type == "react"
+            assert stored[0].target_kind == "content"
+            assert stored[0].target_id == "post1"
+            assert stored[0].payload_json is not None
+            assert "agree" in stored[0].payload_json
+
     def test_preview_text_truncates(self) -> None:
         long_text = "x" * 250
         preview = RunsRepository.preview_text(long_text, max_len=200)

@@ -56,6 +56,37 @@ class TestMigrations:
         migrate(database.conn)
         assert current_version(database.conn) == SCHEMA_VERSION
 
+    def test_proposed_actions_has_payload_columns(self, database: Database) -> None:
+        columns = {
+            row[1]
+            for row in database.conn.execute("PRAGMA table_info(proposed_actions)").fetchall()
+        }
+        assert {"payload_json", "target_kind", "target_id"} <= columns
+
+    def test_upgrades_v1_database(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        from hypeagent.db.migrations import SCHEMA_V1, _set_version
+
+        path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(path)
+        # Simulate a v1 schema without payload columns.
+        legacy_v1 = SCHEMA_V1.replace(
+            "  created_at TEXT NOT NULL,\n  payload_json TEXT,\n  target_kind TEXT,\n  target_id TEXT,\n",
+            "  created_at TEXT NOT NULL,\n",
+        )
+        conn.executescript(legacy_v1)
+        _set_version(conn, 1)
+        conn.close()
+
+        with Database(path) as db:
+            assert current_version(db.conn) == 2
+            columns = {
+                row[1]
+                for row in db.conn.execute("PRAGMA table_info(proposed_actions)").fetchall()
+            }
+            assert {"payload_json", "target_kind", "target_id"} <= columns
+
 
 class TestUsageRepository:
     def test_record_and_read_costs(self, usage_repo: UsageRepository) -> None:
