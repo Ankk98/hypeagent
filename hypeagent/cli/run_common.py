@@ -91,6 +91,8 @@ def execute_run(
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=3) from exc
 
+    for error in result.errors:
+        typer.secho(f"✗ {error}", fg=typer.colors.RED, err=True)
     typer.echo(
         f"Run {result.run_id}: {result.status} "
         f"({len(result.proposed_actions)} proposed, "

@@ -111,6 +111,12 @@ class AgentRunner:
                 except PlatformError as exc:
                     status = "failed"
                     errors.append(f"{agent_id}: {exc}")
+                    self._logger.error(
+                        "run_id=%s agent=%s event=platform_error error=%s",
+                        run_id,
+                        agent_id,
+                        exc,
+                    )
                     continue
                 except Exception as exc:
                     status = "failed"
