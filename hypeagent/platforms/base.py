@@ -3,16 +3,55 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Literal
 
 from hypeagent.config.schema import HttpConfig, PlatformConfig, TargetingConfig
 from hypeagent.config.secrets_schema import AccountSecret
+from hypeagent.models.action import (
+    ActionKind,
+    ActionSpec,
+    ActionTarget,
+    ActionTargetKind,
+    PublishResult,
+)
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext
 
 
 class PlatformError(Exception):
     """Raised when a platform API call fails."""
+
+
+@dataclass(frozen=True)
+class ReactionCapability:
+    """Connector-declared reaction support."""
+
+    target_kinds: frozenset[ActionTargetKind]
+    allowed_types: frozenset[str]
+    mode: Literal["toggle", "set", "additive"]
+    max_per_entity: int | None = 1
+
+
+@dataclass(frozen=True)
+class VoteCapability:
+    """Connector-declared scalar vote support (e.g. Reddit upvote/downvote)."""
+
+    target_kinds: frozenset[ActionTargetKind]
+    allowed_values: frozenset[int]
+    mode: Literal["toggle", "set", "additive"] = "set"
+    max_per_entity: int | None = 1
+
+
+@dataclass(frozen=True)
+class PlatformCapabilities:
+    """What engagement kinds a connector can publish."""
+
+    text_comment: bool = True
+    text_reply: bool = True
+    reactions: ReactionCapability | None = None
+    votes: VoteCapability | None = None
 
 
 class PlatformConnector(ABC):
@@ -47,6 +86,116 @@ class PlatformConnector(ABC):
         parent_comment_id: str | None,
     ) -> Comment:
         """POST comment/reply as current account. Raises PlatformError on failure."""
+
+    def capabilities(self) -> PlatformCapabilities:
+        """Default: comments + replies only (today's Reddit behavior)."""
+        return PlatformCapabilities()
+
+    def publish_reaction(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+        reaction_type: str,
+    ) -> PublishResult:
+        """Publish a reaction. Override when capabilities().reactions is non-null."""
+        _ = ctx, target, reaction_type
+        msg = (
+            f"Connector {self.name!r} advertises reactions but does not implement "
+            "publish_reaction()"
+        )
+        raise PlatformError(msg)
+
+    def publish_vote(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+        vote_value: int,
+    ) -> PublishResult:
+        """Publish a scalar vote. Override when capabilities().votes is non-null."""
+        _ = ctx, target, vote_value
+        msg = (
+            f"Connector {self.name!r} advertises votes but does not implement "
+            "publish_vote()"
+        )
+        raise PlatformError(msg)
+
+    def execute(self, ctx: RunContext, spec: ActionSpec) -> PublishResult:
+        """Publish an ActionSpec. Default routes COMMENT/REPLY/REACT/VOTE to helpers."""
+        if spec.kind in (ActionKind.COMMENT, ActionKind.REPLY):
+            text = spec.payload.text
+            if not text:
+                msg = f"ActionSpec kind={spec.kind.value} requires payload.text"
+                raise PlatformError(msg)
+            parent_comment_id = (
+                spec.target.id if spec.kind == ActionKind.REPLY else None
+            )
+            if spec.kind == ActionKind.REPLY and not parent_comment_id:
+                msg = "ActionSpec kind=reply requires target.id (parent comment)"
+                raise PlatformError(msg)
+            comment = self.publish_comment(
+                ctx,
+                spec.content_id,
+                text,
+                parent_comment_id,
+            )
+            return PublishResult(
+                platform_object_id=comment.id,
+                raw={"comment_id": comment.id},
+            )
+        caps = self.capabilities()
+        if spec.kind == ActionKind.REACT:
+            if caps.reactions is None:
+                msg = f"Connector {self.name!r} does not support reactions"
+                raise PlatformError(msg)
+            reaction_type = spec.payload.reaction_type
+            if not reaction_type:
+                msg = "ActionSpec kind=react requires payload.reaction_type"
+                raise PlatformError(msg)
+            if reaction_type not in caps.reactions.allowed_types:
+                msg = (
+                    f"Reaction type {reaction_type!r} is not in connector "
+                    f"{self.name!r} allowlist"
+                )
+                raise PlatformError(msg)
+            if spec.target.kind not in caps.reactions.target_kinds:
+                msg = (
+                    f"Connector {self.name!r} cannot react to target kind "
+                    f"{spec.target.kind.value!r}"
+                )
+                raise PlatformError(msg)
+            return self.publish_reaction(ctx, spec.target, reaction_type)
+        if spec.kind == ActionKind.VOTE:
+            if caps.votes is None:
+                msg = f"Connector {self.name!r} does not support votes"
+                raise PlatformError(msg)
+            vote_value = spec.payload.vote_value
+            if vote_value is None:
+                msg = "ActionSpec kind=vote requires payload.vote_value"
+                raise PlatformError(msg)
+            if vote_value not in caps.votes.allowed_values:
+                msg = (
+                    f"Vote value {vote_value!r} is not in connector "
+                    f"{self.name!r} allowlist"
+                )
+                raise PlatformError(msg)
+            if spec.target.kind not in caps.votes.target_kinds:
+                msg = (
+                    f"Connector {self.name!r} cannot vote on target kind "
+                    f"{spec.target.kind.value!r}"
+                )
+                raise PlatformError(msg)
+            return self.publish_vote(ctx, spec.target, vote_value)
+        msg = f"Unsupported action kind for execute(): {spec.kind.value}"
+        raise PlatformError(msg)
+
+    def current_engagement(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+    ) -> dict[str, Any]:
+        """Return current user engagement on a target (e.g. myReaction). Default {}."""
+        _ = ctx, target
+        return {}
 
     def can_reply(
         self,

@@ -1,26 +1,114 @@
-"""Action type planning: comment vs reply from per-agent quotas."""
+"""Action kind planning from quotas, capabilities, and engagement config."""
 
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from hypeagent.config.schema import PerAgentConfig
-from hypeagent.models.action import ActionType
+from hypeagent.agent.reactions import choose_reaction_type, resolve_allowed_types
+from hypeagent.agent.votes import choose_vote_value, resolve_allowed_values
+from hypeagent.config.schema import (
+    DEFAULT_ACTION_PRIORITY,
+    ActionPriorityName,
+    PerAgentConfig,
+    ReactionTargetName,
+)
+from hypeagent.models.action import (
+    ActionKind,
+    ActionPayload,
+    ActionSpec,
+    ActionTarget,
+    ActionTargetKind,
+)
 from hypeagent.models.content import Comment, Thread
 from hypeagent.models.run import RunContext
+from hypeagent.platforms.base import ReactionCapability, VoteCapability
+
+_PRIORITY_TO_KIND: dict[ActionPriorityName, ActionKind] = {
+    "reply": ActionKind.REPLY,
+    "comment": ActionKind.COMMENT,
+    "reaction": ActionKind.REACT,
+    "vote": ActionKind.VOTE,
+}
+
+_TARGET_NAME_TO_KIND = {
+    "content": ActionTargetKind.CONTENT,
+    "comment": ActionTargetKind.COMMENT,
+}
 
 
 @dataclass(frozen=True)
 class PlannerDecision:
-    """Chosen action type and optional reply parent."""
+    """Chosen ActionSpec (payload filled after drafting / reaction choose)."""
 
-    action_type: ActionType
-    parent: Comment | None
+    spec: ActionSpec
+
+
+def _preview(text: str, max_len: int = 200) -> str:
+    stripped = text.strip()
+    if len(stripped) <= max_len:
+        return stripped
+    if max_len <= 3:
+        return stripped[:max_len]
+    return stripped[: max_len - 3].rstrip() + "..."
+
+
+def _comment_spec(thread: Thread) -> ActionSpec:
+    content = thread.content
+    return ActionSpec(
+        kind=ActionKind.COMMENT,
+        content_id=content.id,
+        target=ActionTarget(
+            kind=ActionTargetKind.CONTENT,
+            id=content.id,
+            preview=_preview(content.body),
+        ),
+        payload=ActionPayload(),
+    )
+
+
+def _reply_spec(thread: Thread, parent: Comment) -> ActionSpec:
+    return ActionSpec(
+        kind=ActionKind.REPLY,
+        content_id=thread.content.id,
+        target=ActionTarget(
+            kind=ActionTargetKind.COMMENT,
+            id=parent.id,
+            preview=_preview(parent.body),
+        ),
+        payload=ActionPayload(),
+    )
+
+
+def _react_spec(
+    thread: Thread,
+    target: ActionTarget,
+    reaction_type: str,
+) -> ActionSpec:
+    return ActionSpec(
+        kind=ActionKind.REACT,
+        content_id=thread.content.id,
+        target=target,
+        payload=ActionPayload(reaction_type=reaction_type),
+    )
+
+
+def _vote_spec(
+    thread: Thread,
+    target: ActionTarget,
+    vote_value: int,
+) -> ActionSpec:
+    return ActionSpec(
+        kind=ActionKind.VOTE,
+        content_id=thread.content.id,
+        target=target,
+        payload=ActionPayload(vote_value=vote_value),
+    )
 
 
 class Planner:
-    """Decide comment vs reply from quotas and thread state (§10.3)."""
+    """Decide action kind from quotas ∩ capabilities ∩ engagement config."""
 
     def decide(
         self,
@@ -29,29 +117,180 @@ class Planner:
         ctx: RunContext,
     ) -> PlannerDecision | None:
         """
-        v1 logic:
-        - If replies quota > 0 and thread has comments → REPLY (random eligible parent)
-        - Else if comments quota > 0 → COMMENT
-        - Else skip (return None)
+        Try kinds in action_priority order (default: reply → comment → reaction → vote).
 
-        When no eligible reply targets exist, fall back to COMMENT if that quota allows.
+        REPLY/COMMENT keep prior eligibility rules. REACT/VOTE use engagement config and
+        connector capabilities.
         """
+        priority = ctx.config.run.action_priority or list(DEFAULT_ACTION_PRIORITY)
+        for name in priority:
+            kind = _PRIORITY_TO_KIND[name]
+            if kind == ActionKind.REPLY:
+                decision = self._try_reply(per_agent, thread, ctx)
+            elif kind == ActionKind.COMMENT:
+                decision = self._try_comment(per_agent, thread)
+            elif kind == ActionKind.REACT:
+                decision = self._try_react(per_agent, thread, ctx)
+            elif kind == ActionKind.VOTE:
+                decision = self._try_vote(per_agent, thread, ctx)
+            else:
+                decision = None
+            if decision is not None:
+                return decision
+        return None
+
+    def _try_reply(
+        self,
+        per_agent: PerAgentConfig,
+        thread: Thread,
+        ctx: RunContext,
+    ) -> PlannerDecision | None:
+        if per_agent.replies <= 0 or not thread.comments:
+            return None
         reply_depth_max = ctx.config.run.reply_depth_max
         connector = ctx.connector
+        eligible = [
+            comment
+            for comment in thread.comments
+            if connector.can_reply(ctx, thread, comment, reply_depth_max)
+        ]
+        if not eligible:
+            return None
+        return PlannerDecision(_reply_spec(thread, random.choice(eligible)))
 
-        if per_agent.replies > 0 and thread.comments:
-            eligible = [
-                comment
-                for comment in thread.comments
-                if connector.can_reply(ctx, thread, comment, reply_depth_max)
-            ]
-            if eligible:
-                return PlannerDecision(ActionType.REPLY, random.choice(eligible))
-            if per_agent.comments > 0:
-                return PlannerDecision(ActionType.COMMENT, None)
+    def _try_comment(
+        self,
+        per_agent: PerAgentConfig,
+        thread: Thread,
+    ) -> PlannerDecision | None:
+        if per_agent.comments <= 0:
+            return None
+        return PlannerDecision(_comment_spec(thread))
+
+    def _try_react(
+        self,
+        per_agent: PerAgentConfig,
+        thread: Thread,
+        ctx: RunContext,
+    ) -> PlannerDecision | None:
+        if per_agent.reactions <= 0:
             return None
 
-        if per_agent.comments > 0:
-            return PlannerDecision(ActionType.COMMENT, None)
+        caps = ctx.connector.capabilities().reactions
+        if caps is None:
+            return None
 
-        return None
+        reaction_cfg = ctx.config.engagement.reactions
+        allowed_types = resolve_allowed_types(reaction_cfg, caps.allowed_types)
+        if not allowed_types:
+            return None
+
+        targets = self._engagement_targets(
+            thread,
+            ctx,
+            caps,
+            targets=reaction_cfg.targets,
+            avoid_authors=set(reaction_cfg.avoid_content_author_ids),
+            skip_if_key="myReaction" if reaction_cfg.skip_if_already_reacted else None,
+        )
+        if not targets:
+            return None
+
+        target = random.choice(targets)
+        reaction_type = choose_reaction_type(
+            allowed_types=allowed_types,
+            reaction_cfg=reaction_cfg,
+            persona=ctx.persona,
+            thread=thread,
+            llm_client=ctx.llm_client if reaction_cfg.strategy == "llm_choose" else None,
+            run_id=ctx.run_id,
+            agent_id=ctx.agent_id,
+        )
+        if reaction_type is None:
+            return None
+        return PlannerDecision(_react_spec(thread, target, reaction_type))
+
+    def _try_vote(
+        self,
+        per_agent: PerAgentConfig,
+        thread: Thread,
+        ctx: RunContext,
+    ) -> PlannerDecision | None:
+        if per_agent.votes <= 0:
+            return None
+
+        caps = ctx.connector.capabilities().votes
+        if caps is None:
+            return None
+
+        vote_cfg = ctx.config.engagement.votes
+        allowed_values = resolve_allowed_values(vote_cfg, caps.allowed_values)
+        if not allowed_values:
+            return None
+
+        targets = self._engagement_targets(
+            thread,
+            ctx,
+            caps,
+            targets=vote_cfg.targets,
+            avoid_authors=set(vote_cfg.avoid_content_author_ids),
+            skip_if_key="myVote" if vote_cfg.skip_if_already_voted else None,
+        )
+        if not targets:
+            return None
+
+        target = random.choice(targets)
+        vote_value = choose_vote_value(allowed_values)
+        if vote_value is None:
+            return None
+        return PlannerDecision(_vote_spec(thread, target, vote_value))
+
+    def _engagement_targets(
+        self,
+        thread: Thread,
+        ctx: RunContext,
+        caps: ReactionCapability | VoteCapability,
+        *,
+        targets: Sequence[ReactionTargetName],
+        avoid_authors: set[str],
+        skip_if_key: str | None,
+    ) -> list[ActionTarget]:
+        candidates: list[ActionTarget] = []
+
+        for target_name in targets:
+            kind = _TARGET_NAME_TO_KIND[target_name]
+            if kind not in caps.target_kinds:
+                continue
+            if kind == ActionTargetKind.CONTENT:
+                if thread.content.author_id in avoid_authors:
+                    continue
+                target = ActionTarget(
+                    kind=ActionTargetKind.CONTENT,
+                    id=thread.content.id,
+                    preview=_preview(thread.content.body),
+                )
+                if self._engagement_target_ok(ctx, target, skip_if_key):
+                    candidates.append(target)
+            elif kind == ActionTargetKind.COMMENT:
+                for comment in thread.comments:
+                    if comment.author_id in avoid_authors:
+                        continue
+                    target = ActionTarget(
+                        kind=ActionTargetKind.COMMENT,
+                        id=comment.id,
+                        preview=_preview(comment.body),
+                    )
+                    if self._engagement_target_ok(ctx, target, skip_if_key):
+                        candidates.append(target)
+        return candidates
+
+    def _engagement_target_ok(
+        self,
+        ctx: RunContext,
+        target: ActionTarget,
+        skip_if_key: str | None,
+    ) -> bool:
+        if skip_if_key is None:
+            return True
+        engagement = ctx.connector.current_engagement(ctx, target)
+        return engagement.get(skip_if_key) is None

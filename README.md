@@ -2,7 +2,7 @@
 
 CLI based tool for running LLM-powered persona agents on social platforms.
 
-> **Alpha (v0.1):** Early release — expect breaking changes before v1.0.
+> **Alpha (v0.2):** Early release — expect breaking changes before v1.0.
 
 Seed discussion on platforms like Reddit with configurable personas, budgets, and approval workflows.
 
@@ -68,10 +68,13 @@ Logs are written to `./logs/hypeagent.log` with `run_id` and `agent_id` on each 
 
 | Guide | Description |
 | --- | --- |
+| [Use in other projects](docs/use_in_other_projects.md) | Add as a dep; commit connector/config in the product repo |
 | [Config reference](docs/config_reference.md) | Full `hypeagent.yaml` and secrets schema |
 | [Connector guide](platforms/README.md) | Build a custom `PlatformConnector` |
 | [Tool guide](tools/README.md) | Build custom knowledge tools |
+| [Engagement actions plan](docs/engagement_actions_plan.md) | Draft: reactions/votes via capability-based actions |
 | [Reddit example](examples/reddit/README.md) | End-to-end quickstart |
+| [Typed-reactions example](examples/custom-reactions/README.md) | Custom connector with post/comment reactions |
 | [CHANGELOG](CHANGELOG.md) | Release history |
 
 ## Scheduled runs

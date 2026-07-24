@@ -125,6 +125,33 @@ class TestHypeagentConfig:
             config = HypeagentConfig.model_validate(data)
             assert config.targeting.strategy == strategy
 
+    def test_accepts_reactions_and_engagement(self) -> None:
+        data = _minimal_config()
+        data["run"] = {
+            "agents": ["alice"],
+            "per_agent": {"comments": 0, "replies": 0, "reactions": 1},
+            "action_priority": ["reaction", "comment", "reply"],
+        }
+        data["engagement"] = {
+            "reactions": {
+                "enabled": True,
+                "targets": ["content"],
+                "types": ["agree", "like"],
+                "strategy": "weighted",
+                "weights": {"agree": 0.7, "like": 0.3},
+            }
+        }
+        config = HypeagentConfig.model_validate(data)
+        assert config.run.per_agent.reactions == 1
+        assert config.engagement.reactions.strategy == "weighted"
+        assert config.reactions_requested() is True
+
+    def test_default_engagement_disabled(self) -> None:
+        config = HypeagentConfig.model_validate(_minimal_config())
+        assert config.run.per_agent.reactions == 0
+        assert config.engagement.reactions.enabled is False
+        assert config.reactions_requested() is False
+
 
 class TestSecrets:
     def test_example_secrets_load(self) -> None:

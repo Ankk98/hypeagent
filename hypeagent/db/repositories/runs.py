@@ -25,6 +25,9 @@ class StoredProposedAction:
     published: bool
     platform_comment_id: str | None
     created_at: str
+    payload_json: str | None = None
+    target_kind: str | None = None
+    target_id: str | None = None
 
 
 class RunsRepository:
@@ -107,8 +110,9 @@ class RunsRepository:
             """
             INSERT INTO proposed_actions (
               run_id, agent_id, action_type, content_id, content_preview,
-              parent_comment_id, parent_preview, draft_text, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              parent_comment_id, parent_preview, draft_text, created_at,
+              payload_json, target_kind, target_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 proposed.run_id,
@@ -120,6 +124,9 @@ class RunsRepository:
                 proposed.parent_comment_preview,
                 proposed.draft_text,
                 created_at,
+                proposed.payload_json,
+                proposed.target_kind.value if proposed.target_kind else None,
+                proposed.target_id,
             ),
         )
         self._db.conn.commit()
@@ -132,6 +139,18 @@ class RunsRepository:
         self._db.conn.execute(
             "UPDATE proposed_actions SET draft_text = ? WHERE id = ?",
             (draft_text, action_id),
+        )
+        self._db.conn.commit()
+
+    def update_reaction(self, action_id: int, payload_json: str) -> None:
+        """Update reaction payload after inline approval edit."""
+        self._db.conn.execute(
+            """
+            UPDATE proposed_actions
+            SET payload_json = ?
+            WHERE id = ?
+            """,
+            (payload_json, action_id),
         )
         self._db.conn.commit()
 
@@ -154,7 +173,7 @@ class RunsRepository:
             SELECT
               id, run_id, agent_id, action_type, content_id, content_preview,
               parent_comment_id, parent_preview, draft_text, published,
-              platform_comment_id, created_at
+              platform_comment_id, created_at, payload_json, target_kind, target_id
             FROM proposed_actions
             WHERE run_id = ?
             ORDER BY id ASC
@@ -175,6 +194,9 @@ class RunsRepository:
                 published=bool(row["published"]),
                 platform_comment_id=row["platform_comment_id"],
                 created_at=str(row["created_at"]),
+                payload_json=row["payload_json"],
+                target_kind=row["target_kind"],
+                target_id=row["target_id"],
             )
             for row in rows
         ]

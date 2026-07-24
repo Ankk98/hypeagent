@@ -75,6 +75,29 @@ hypeagent cron-print --times "09:00,13:00,18:00,22:00" --timezone Asia/Kolkata
 
 Paste the output into `crontab -e`. Use the full path to `.venv/bin/hypeagent` in crontab lines so scheduled jobs do not require shell activation.
 
+## Votes (optional)
+
+Reddit upvotes are scalar votes, not emoji reactions. To upvote posts instead of
+replying, set:
+
+```yaml
+run:
+  per_agent:
+    comments: 0
+    replies: 0
+    votes: 1
+  action_priority: [vote, reply, comment]
+
+engagement:
+  votes:
+    enabled: true
+    targets: [content]
+    values: [1]
+    skip_if_already_voted: true
+```
+
+Then `hypeagent validate` and `hypeagent dry-run` as usual.
+
 ## Usage and budgets
 
 ```bash

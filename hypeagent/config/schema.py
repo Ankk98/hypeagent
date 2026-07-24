@@ -58,12 +58,94 @@ class BudgetConfig(StrictModel):
 class PerAgentConfig(StrictModel):
     comments: int = Field(default=0, ge=0)
     replies: int = Field(default=1, ge=0)
+    reactions: int = Field(default=0, ge=0)
+    votes: int = Field(default=0, ge=0)
+
+
+ActionPriorityName = Literal["reply", "comment", "reaction", "vote"]
+DEFAULT_ACTION_PRIORITY: tuple[ActionPriorityName, ...] = (
+    "reply",
+    "comment",
+    "reaction",
+    "vote",
+)
+ReactionTargetName = Literal["content", "comment"]
+ReactionStrategyName = Literal["weighted", "random", "llm_choose", "persona_affinity"]
+
+
+def _default_reaction_targets() -> list[ReactionTargetName]:
+    return ["content"]
+
+
+def _default_vote_targets() -> list[ReactionTargetName]:
+    return ["content"]
+
+
+class ReactionsEngagementConfig(StrictModel):
+    enabled: bool = False
+    targets: list[ReactionTargetName] = Field(default_factory=_default_reaction_targets)
+    types: list[str] | None = None
+    strategy: ReactionStrategyName = "weighted"
+    weights: dict[str, float] = Field(default_factory=dict)
+    skip_if_already_reacted: bool = True
+    avoid_content_author_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("targets")
+    @classmethod
+    def non_empty_targets(cls, value: list[ReactionTargetName]) -> list[ReactionTargetName]:
+        if not value:
+            msg = "engagement.reactions.targets must be non-empty"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("types")
+    @classmethod
+    def non_empty_types(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and not value:
+            msg = "engagement.reactions.types must be non-empty when set"
+            raise ValueError(msg)
+        return value
+
+
+class VotesEngagementConfig(StrictModel):
+    enabled: bool = False
+    targets: list[ReactionTargetName] = Field(default_factory=_default_vote_targets)
+    values: list[int] | None = None
+    skip_if_already_voted: bool = True
+    avoid_content_author_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("targets")
+    @classmethod
+    def non_empty_targets(cls, value: list[ReactionTargetName]) -> list[ReactionTargetName]:
+        if not value:
+            msg = "engagement.votes.targets must be non-empty"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("values")
+    @classmethod
+    def valid_values(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and not value:
+            msg = "engagement.votes.values must be non-empty when set"
+            raise ValueError(msg)
+        if value is not None:
+            unknown = sorted({v for v in value if v not in {-1, 0, 1}})
+            if unknown:
+                msg = f"engagement.votes.values must be -1, 0, or 1; got {unknown}"
+                raise ValueError(msg)
+        return value
+
+
+class EngagementConfig(StrictModel):
+    reactions: ReactionsEngagementConfig = Field(default_factory=ReactionsEngagementConfig)
+    votes: VotesEngagementConfig = Field(default_factory=VotesEngagementConfig)
 
 
 class RunConfig(StrictModel):
     agents: list[str] = Field(min_length=1)
     per_agent: PerAgentConfig
     reply_depth_max: int = Field(default=2, ge=0)
+    action_priority: list[ActionPriorityName] | None = None
     extra_info: str | None = None
 
 
@@ -134,6 +216,7 @@ class HypeagentConfig(StrictModel):
     personas: dict[str, PersonaConfig]
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    engagement: EngagementConfig = Field(default_factory=EngagementConfig)
 
     @model_validator(mode="after")
     def validate_run_agents(self) -> HypeagentConfig:
@@ -142,6 +225,14 @@ class HypeagentConfig(StrictModel):
             msg = f"run.agents references unknown personas: {', '.join(missing)}"
             raise ValueError(msg)
         return self
+
+    def reactions_requested(self) -> bool:
+        """True when config asks to publish reactions this run."""
+        return self.run.per_agent.reactions > 0 or self.engagement.reactions.enabled
+
+    def votes_requested(self) -> bool:
+        """True when config asks to publish votes this run."""
+        return self.run.per_agent.votes > 0 or self.engagement.votes.enabled
 
 
 # Alias used in the implementation plan.

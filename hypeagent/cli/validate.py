@@ -6,9 +6,13 @@ from pathlib import Path
 
 import typer
 
+from hypeagent.config.engagement import validate_engagement_against_capabilities
 from hypeagent.config.loader import ConfigError, load_config
+from hypeagent.config.schema import HypeagentConfig
 from hypeagent.config.secrets import SecretsError, load_secrets, validate_account_refs
+from hypeagent.config.secrets_schema import Secrets
 from hypeagent.knowledge.tools import validate_tools
+from hypeagent.platforms.base import PlatformConnector
 from hypeagent.platforms.registry import ConnectorLoadError, load_connector
 
 
@@ -56,8 +60,39 @@ def run_validate(config_path: Path, secrets_path: Path) -> None:
         raise typer.Exit(code=1)
 
     typer.echo("✓ personas reference valid accounts")
+
+    engagement_errors = _validate_engagement(config, connector_cls, secrets)
+    if engagement_errors:
+        for message in engagement_errors:
+            typer.secho(f"✗ {message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    if config.reactions_requested():
+        typer.echo("✓ engagement reactions compatible with connector capabilities")
+    if config.votes_requested():
+        typer.echo("✓ engagement votes compatible with connector capabilities")
+
     typer.echo(
         f"✓ budgets: daily=${config.budgets.llm_daily_usd:.2f} "
         f"total=${config.budgets.llm_total_usd:.2f}"
     )
     typer.echo("Ready.")
+
+
+def _validate_engagement(
+    config: HypeagentConfig,
+    connector_cls: type[PlatformConnector],
+    secrets: Secrets,
+) -> list[str]:
+    if not config.reactions_requested() and not config.votes_requested():
+        return []
+
+    first_agent = config.run.agents[0]
+    account = secrets.accounts[config.personas[first_agent].account]
+    connector = connector_cls(config.platform, account, config.http)
+    try:
+        caps = connector.capabilities()
+    finally:
+        close = getattr(connector, "close", None)
+        if callable(close):
+            close()
+    return validate_engagement_against_capabilities(config, caps)
