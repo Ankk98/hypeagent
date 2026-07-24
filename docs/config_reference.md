@@ -86,6 +86,8 @@ Unknown keys are rejected. All `extra_info` fields are injected into LLM prompts
 | `per_agent.reactions` | no (default `0`) | Reaction publishes per agent per run |
 | `per_agent.votes` | no (default `0`) | Scalar vote publishes per agent per run |
 | `action_priority` | no | Kind order when multiple quotas remain: `reply`, `comment`, `reaction`, `vote` (default: that order) |
+
+Each agent picks **one post**, then the runner loops: plan → draft/choose → publish, decrementing the matching `per_agent` quota until none remain (or `budgets.max_actions_per_run` is hit). So `comments: 1` and `reactions: 1` with `action_priority: [comment, reaction]` yields a comment **and** a reaction on the same post.
 | `reply_depth_max` | `2` | Max comment nesting depth for replies |
 | `extra_info` | no | Run-level rules for prompts |
 

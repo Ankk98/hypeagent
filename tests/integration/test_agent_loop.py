@@ -23,6 +23,7 @@ from hypeagent.db.repositories.runs import RunsRepository
 from hypeagent.llm.client import LLMResponse
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext, RunMode
+from hypeagent.models.action import ActionTargetKind
 from hypeagent.platforms.base import PlatformConnector
 
 
@@ -305,6 +306,108 @@ class TestAgentLoopDryRun:
             result = AgentRunner(config, secrets, db).run_all(RunMode.DRY_RUN)
 
         assert len(result.proposed_actions) == 1
+
+    def test_dry_run_comment_then_reaction_same_agent(
+        self,
+        tmp_path,
+        mock_llm: MagicMock,
+    ) -> None:
+        """per_agent quotas of comments+reactions yield two proposals on one post."""
+        from hypeagent.models.action import ActionKind, ActionTarget, PublishResult
+        from hypeagent.platforms.base import PlatformCapabilities, ReactionCapability
+
+        config = HypeagentConfig.model_validate(
+            {
+                **_minimal_config(agents=["alice"]).model_dump(),
+                "run": {
+                    "agents": ["alice"],
+                    "per_agent": {"comments": 1, "replies": 0, "reactions": 1},
+                    "action_priority": ["comment", "reaction", "reply"],
+                    "reply_depth_max": 2,
+                },
+                "engagement": {
+                    "reactions": {
+                        "enabled": True,
+                        "targets": ["content"],
+                        "types": ["agree", "like"],
+                        "strategy": "weighted",
+                        "weights": {"agree": 0.5, "like": 0.5},
+                        "skip_if_already_reacted": True,
+                    }
+                },
+            }
+        )
+        secrets = _secrets()
+        db_path = tmp_path / "multi.db"
+
+        class ReactingConnector(MockConnector):
+            def capabilities(self) -> PlatformCapabilities:
+                return PlatformCapabilities(
+                    reactions=ReactionCapability(
+                        target_kinds=frozenset({ActionTargetKind.CONTENT}),
+                        allowed_types=frozenset({"agree", "like"}),
+                        mode="toggle",
+                    )
+                )
+
+            def publish_reaction(
+                self,
+                ctx: RunContext,
+                target: ActionTarget,
+                reaction_type: str,
+            ) -> PublishResult:
+                _ = ctx
+                return PublishResult(
+                    platform_object_id=f"rxn-{target.id}-{reaction_type}",
+                    raw={"type": reaction_type},
+                )
+
+            def current_engagement(
+                self,
+                ctx: RunContext,
+                target: ActionTarget,
+            ) -> dict[str, Any]:
+                _ = ctx, target
+                return {"myReaction": None}
+
+        def connector_loader(name: str) -> type[PlatformConnector]:
+            _ = name
+
+            class _Loader(ReactingConnector):
+                def __init__(
+                    self,
+                    platform_config: Any,
+                    account: AccountSecret,
+                    http: Any,
+                ) -> None:
+                    super().__init__(
+                        [_content("post-a")],
+                        {
+                            "post-a": Thread(
+                                content=_content("post-a"),
+                                comments=[_comment("c1", "post-a")],
+                            ),
+                        },
+                        platform_config=platform_config,
+                        account=account,
+                        http=http,
+                    )
+
+            return _Loader
+
+        with (
+            patch("hypeagent.agent.loop.load_connector", side_effect=connector_loader),
+            patch("hypeagent.agent.loop.LLMClient", return_value=mock_llm),
+            Database(db_path) as db,
+        ):
+            result = AgentRunner(config, secrets, db).run_all(RunMode.DRY_RUN)
+
+        assert result.status == "completed"
+        assert len(result.proposed_actions) == 2
+        kinds = [p.action_type for p in result.proposed_actions]
+        assert kinds == [ActionKind.COMMENT, ActionKind.REACT]
+        assert result.proposed_actions[0].content_id == result.proposed_actions[1].content_id
+        assert result.proposed_actions[1].reaction_type in {"agree", "like"}
 
 
 class TestAgentLoopPublishModes:

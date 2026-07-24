@@ -12,7 +12,7 @@ from uuid import uuid4
 from hypeagent.agent.approval import ApprovalDecision, ApprovalPrompt, ApprovalQuitError
 from hypeagent.agent.drafter import Drafter
 from hypeagent.agent.planner import Planner
-from hypeagent.config.schema import HypeagentConfig
+from hypeagent.config.schema import HypeagentConfig, PerAgentConfig
 from hypeagent.config.secrets_schema import Secrets
 from hypeagent.db.connection import Database
 from hypeagent.db.repositories.agent_memory import AgentMemoryRepository
@@ -98,7 +98,7 @@ class AgentRunner:
                     break
 
                 try:
-                    proposed, published = self._run_one_agent(
+                    agent_proposed, agent_published = self._run_one_agent(
                         run_id=run_id,
                         agent_id=agent_id,
                         mode=mode,
@@ -109,6 +109,7 @@ class AgentRunner:
                         planner=planner,
                         drafter=drafter,
                         approval=approval,
+                        actions_so_far=len(proposed_actions),
                     )
                 except ApprovalQuitError:
                     status = "failed"
@@ -137,10 +138,8 @@ class AgentRunner:
                     )
                     continue
 
-                if proposed is not None:
-                    proposed_actions.append(proposed)
-                if published is not None:
-                    published_actions.append(published)
+                proposed_actions.extend(agent_proposed)
+                published_actions.extend(agent_published)
 
             if errors and status == "completed":
                 status = "failed"
@@ -177,7 +176,8 @@ class AgentRunner:
         planner: Planner,
         drafter: Drafter,
         approval: ApprovalPrompt,
-    ) -> tuple[ProposedAction | None, PublishedAction | None]:
+        actions_so_far: int,
+    ) -> tuple[list[ProposedAction], list[PublishedAction]]:
         persona = self._config.personas[agent_id]
         account = self._secrets.accounts[persona.account]
         connector_cls = load_connector(self._config.platform.connector)
@@ -213,7 +213,7 @@ class AgentRunner:
                 agent_id,
                 self._config.targeting.strategy,
             )
-            return None, None
+            return [], []
 
         content = random.choice(candidates)
         self._logger.info(
@@ -225,84 +225,124 @@ class AgentRunner:
         )
 
         thread = connector.get_thread(ctx, content.id)
-        decision = planner.decide(self._config.run.per_agent, thread, ctx)
-        if decision is None:
+        remaining = self._config.run.per_agent.model_copy(deep=True)
+        proposed_actions: list[ProposedAction] = []
+        published_actions: list[PublishedAction] = []
+        max_actions = self._config.budgets.max_actions_per_run
+
+        while actions_so_far + len(proposed_actions) < max_actions:
+            decision = planner.decide(remaining, thread, ctx)
+            if decision is None:
+                if not proposed_actions:
+                    self._logger.warning(
+                        "run_id=%s agent=%s event=no_action_quota content_id=%s",
+                        run_id,
+                        agent_id,
+                        content.id,
+                    )
+                break
+
+            spec = decision.spec
+            proposed = self._propose_from_spec(
+                run_id=run_id,
+                agent_id=agent_id,
+                persona_account=persona.account,
+                content=content,
+                thread=thread,
+                spec=spec,
+                ctx=ctx,
+                drafter=drafter,
+            )
+            if proposed is None:
+                # Empty draft or failed propose — consume quota so we do not loop forever.
+                remaining = _consume_quota(remaining, spec.kind)
+                continue
+
+            action_id = runs_repo.save_proposed(proposed)
+            published = self._handle_publish_mode(
+                ctx=ctx,
+                connector=connector,
+                proposed=proposed,
+                action_id=action_id,
+                mode=mode,
+                approval=approval,
+                memory_repo=memory_repo,
+                runs_repo=runs_repo,
+            )
+            proposed_actions.append(proposed)
+            if published is not None:
+                published_actions.append(published)
+            remaining = _consume_quota(remaining, spec.kind)
+            budget_guard.check()
+
+        return proposed_actions, published_actions
+
+    def _propose_from_spec(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        persona_account: str,
+        content: Content,
+        thread: Thread,
+        spec: ActionSpec,
+        ctx: RunContext,
+        drafter: Drafter,
+    ) -> ProposedAction | None:
+        if spec.kind == ActionKind.REACT:
+            return self._build_react_proposed(
+                run_id=run_id,
+                agent_id=agent_id,
+                persona_account=persona_account,
+                content=content,
+                spec=spec,
+            )
+        if spec.kind == ActionKind.VOTE:
+            return self._build_vote_proposed(
+                run_id=run_id,
+                agent_id=agent_id,
+                persona_account=persona_account,
+                content=content,
+                spec=spec,
+            )
+
+        parent = _resolve_parent(thread, spec)
+        draft_result = drafter.draft(ctx, thread, spec.kind, parent)
+        draft_text = draft_result.final_text
+        if not draft_text:
             self._logger.warning(
-                "run_id=%s agent=%s event=no_action_quota content_id=%s",
+                "run_id=%s agent=%s event=empty_draft content_id=%s kind=%s",
                 run_id,
                 agent_id,
                 content.id,
+                spec.kind.value,
             )
-            return None, None
+            return None
 
-        spec = decision.spec
-        if spec.kind == ActionKind.REACT:
-            proposed = self._build_react_proposed(
-                run_id=run_id,
-                agent_id=agent_id,
-                persona_account=persona.account,
-                content=content,
-                spec=spec,
-            )
-        elif spec.kind == ActionKind.VOTE:
-            proposed = self._build_vote_proposed(
-                run_id=run_id,
-                agent_id=agent_id,
-                persona_account=persona.account,
-                content=content,
-                spec=spec,
-            )
-        else:
-            parent = _resolve_parent(thread, spec)
-            draft_result = drafter.draft(ctx, thread, spec.kind, parent)
-            draft_text = draft_result.final_text
-            if not draft_text:
-                self._logger.warning(
-                    "run_id=%s agent=%s event=empty_draft content_id=%s",
-                    run_id,
-                    agent_id,
-                    content.id,
-                )
-                return None, None
-
-            filled = replace(spec, payload=ActionPayload(text=draft_text))
-            parent_preview = (
-                RunsRepository.preview_text(parent.body) if parent is not None else None
-            )
-            proposed = ProposedAction(
-                run_id=run_id,
-                agent_id=agent_id,
-                account_id=persona.account,
-                action_type=filled.kind,
-                content_id=content.id,
-                content_body_preview=RunsRepository.preview_text(content.body),
-                parent_comment_id=parent.id if parent else None,
-                parent_comment_preview=parent_preview,
-                draft_text=draft_text,
-                targeting_strategy=self._config.targeting.strategy,
-                llm_model=draft_result.model,
-                llm_tokens_in=draft_result.tokens_in,
-                llm_tokens_out=draft_result.tokens_out,
-                llm_cost_usd=draft_result.cost_usd,
-                tool_calls=list(draft_result.tool_calls),
-                target_kind=filled.target.kind,
-                target_id=filled.target.id,
-                payload_json=filled.payload.to_json(),
-            )
-        action_id = runs_repo.save_proposed(proposed)
-
-        published = self._handle_publish_mode(
-            ctx=ctx,
-            connector=connector,
-            proposed=proposed,
-            action_id=action_id,
-            mode=mode,
-            approval=approval,
-            memory_repo=memory_repo,
-            runs_repo=runs_repo,
+        filled = replace(spec, payload=ActionPayload(text=draft_text))
+        parent_preview = (
+            RunsRepository.preview_text(parent.body) if parent is not None else None
         )
-        budget_guard.check()
-        return proposed, published
+        return ProposedAction(
+            run_id=run_id,
+            agent_id=agent_id,
+            account_id=persona_account,
+            action_type=filled.kind,
+            content_id=content.id,
+            content_body_preview=RunsRepository.preview_text(content.body),
+            parent_comment_id=parent.id if parent else None,
+            parent_comment_preview=parent_preview,
+            draft_text=draft_text,
+            targeting_strategy=self._config.targeting.strategy,
+            llm_model=draft_result.model,
+            llm_tokens_in=draft_result.tokens_in,
+            llm_tokens_out=draft_result.tokens_out,
+            llm_cost_usd=draft_result.cost_usd,
+            tool_calls=list(draft_result.tool_calls),
+            target_kind=filled.target.kind,
+            target_id=filled.target.id,
+            payload_json=filled.payload.to_json(),
+        )
 
     def _build_react_proposed(
         self,
@@ -514,6 +554,19 @@ class AgentRunner:
             platform_id,
         )
         return published
+
+
+def _consume_quota(remaining: PerAgentConfig, kind: ActionKind) -> PerAgentConfig:
+    """Decrement the quota matching the planned action kind."""
+    if kind == ActionKind.COMMENT:
+        return remaining.model_copy(update={"comments": max(0, remaining.comments - 1)})
+    if kind == ActionKind.REPLY:
+        return remaining.model_copy(update={"replies": max(0, remaining.replies - 1)})
+    if kind == ActionKind.REACT:
+        return remaining.model_copy(update={"reactions": max(0, remaining.reactions - 1)})
+    if kind == ActionKind.VOTE:
+        return remaining.model_copy(update={"votes": max(0, remaining.votes - 1)})
+    return remaining
 
 
 def _resolve_parent(thread: Thread, spec: ActionSpec) -> Comment | None:

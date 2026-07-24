@@ -201,8 +201,9 @@ run:
 
 Semantics (same spirit as today’s planner):
 
-- For each agent, attempt **one** planned action per run iteration (current loop), consuming the matching quota.
-- Multi-action-per-agent (comment **and** react on same post) is a **v2 enhancement**; v1 of this feature keeps “one action per agent per run” unless `per_agent` is raised and the loop gains an inner quota loop (see §8).
+- For each agent, attempt planned actions until `per_agent` quotas are exhausted (or
+  `max_actions_per_run` is hit), consuming the matching quota after each proposal.
+  One content pick per agent; subsequent actions (e.g. comment then react) reuse that thread.
 
 ### 4.2 Engagement policy (new optional section)
 
@@ -380,7 +381,8 @@ Minimal change set:
 4. Publish via `connector.execute(ctx, spec)` instead of only `publish_comment`.
 5. Log `event=published` with kind-specific fields.
 
-**Optional later:** inner loop so one agent can comment **and** react in one run when both quotas > 0 (`max_actions_per_agent_per_run`). Out of scope for the first reaction milestone.
+**Shipped:** inner quota loop — one agent can comment **and** react in one run when both
+`per_agent` quotas are > 0 (same content pick; see `AgentRunner._run_one_agent`).
 
 ---
 

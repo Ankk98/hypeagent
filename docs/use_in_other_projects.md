@@ -62,9 +62,9 @@ EOF
 cd /path/to/resume-maker/seed/hypeagent
 
 cat > requirements.txt <<'EOF'
-hypeagent>=0.1.0
-# Uncomment for Reddit OAuth:
-# hypeagent[reddit]>=0.1.0
+# Prefer PyPI once published: hypeagent>=0.2.0
+# Reactions / ActionSpec live on branch v0.2 until merged to main.
+hypeagent @ git+https://github.com/Ankk98/hypeagent.git@v0.2
 EOF
 
 python3 -m venv .venv
@@ -243,20 +243,15 @@ cd /home/ankk98/repos/resume-maker
 mkdir -p seed/hypeagent
 cd seed/hypeagent
 
-# dependency
 cat > requirements.txt <<'EOF'
-hypeagent>=0.1.0
+hypeagent @ git+https://github.com/Ankk98/hypeagent.git@v0.2
 EOF
 
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# scaffold custom connector example, then replace with your API adapter
-cp -r "$(python -c "import hypeagent, os; print(os.path.dirname(hypeagent.__file__))")/../examples/custom-reactions"/* .
-# Edit platforms/*.py → e.g. platforms/realityplay.py
-# Edit hypeagent.yaml (base_url, personas, budgets)
-
+# Add platforms/realityplay.py, hypeagent.yaml, briefs/, tools/ (commit these)
 cp secrets.example.yaml secrets.local.yaml
 # Fill OpenRouter key + account JWTs locally
 ```
