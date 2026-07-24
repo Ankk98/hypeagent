@@ -63,7 +63,7 @@ cd /path/to/resume-maker/seed/hypeagent
 
 cat > requirements.txt <<'EOF'
 # Prefer PyPI once published: hypeagent>=0.2.0
-hypeagent @ git+https://github.com/Ankk98/hypeagent.git@v0.2
+hypeagent @ git+https://github.com/Ankk98/hypeagent.git
 EOF
 
 python3 -m venv .venv
@@ -243,7 +243,7 @@ mkdir -p seed/hypeagent
 cd seed/hypeagent
 
 cat > requirements.txt <<'EOF'
-hypeagent @ git+https://github.com/Ankk98/hypeagent.git@v0.2
+hypeagent @ git+https://github.com/Ankk98/hypeagent.git
 EOF
 
 python3 -m venv .venv
