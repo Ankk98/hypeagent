@@ -21,10 +21,19 @@ from hypeagent.config.secrets_schema import AccountSecret, Secrets
 from hypeagent.db.connection import Database
 from hypeagent.db.repositories.runs import RunsRepository
 from hypeagent.llm.client import LLMResponse
+from hypeagent.models.action import (
+    ActionKind,
+    ActionTarget,
+    ActionTargetKind,
+    PublishResult,
+)
 from hypeagent.models.content import Comment, Content, Thread
 from hypeagent.models.run import RunContext, RunMode
-from hypeagent.models.action import ActionTargetKind
-from hypeagent.platforms.base import PlatformConnector
+from hypeagent.platforms.base import (
+    PlatformCapabilities,
+    PlatformConnector,
+    ReactionCapability,
+)
 
 
 def _minimal_config(*, agents: list[str] | None = None) -> HypeagentConfig:
@@ -313,9 +322,6 @@ class TestAgentLoopDryRun:
         mock_llm: MagicMock,
     ) -> None:
         """per_agent quotas of comments+reactions yield two proposals on one post."""
-        from hypeagent.models.action import ActionKind, ActionTarget, PublishResult
-        from hypeagent.platforms.base import PlatformCapabilities, ReactionCapability
-
         config = HypeagentConfig.model_validate(
             {
                 **_minimal_config(agents=["alice"]).model_dump(),
